@@ -21,8 +21,11 @@
 /// </copyright>
 
 using System;
+using System.Collections.Concurrent;
 using System.Drawing;
 using System.IO;
+using CefSharp;
+using CefSharp.OffScreen;
 using OpenTK;
 using OpenTK.Graphics.OpenGL;
 using SharpQuake.Framework;
@@ -150,15 +153,92 @@ namespace SharpQuake
             set;
         }
 
+        private RequestContext RequestContext
+        {
+            get;
+            set;
+        }
+
+        public ChromiumWebBrowser Page
+        {
+            get;
+            private set;
+        }        
+
+        private GLPic PageTexture
+        {
+            get;
+            set;
+        }
+
+        private ConcurrentQueue<Bitmap> BrowserBuffer
+        {
+            get;
+            set;
+        }
+
+        private ConcurrentQueue<String> HtmlBuffer
+        {
+            get;
+            set;
+        }
+
+        public ConcurrentQueue<bool> ScreenShotQueue
+        {
+            get;
+            private set;
+        }
+
+        private bool HasRequestedUI
+        {
+            get;
+            set;
+        }
+
         public Scr( Host host )
         {
             Host = host;
+            BrowserBuffer = new ConcurrentQueue<Bitmap>( );
+            HtmlBuffer = new ConcurrentQueue<String>( );
+            ScreenShotQueue = new ConcurrentQueue<bool>( );
         }
 
         // SCR_Init
         public void Initialise( )
         {
-            if( _ViewSize == null )
+            var settings = new CefSettings( )
+            {
+                //By default CefSharp will use an in-memory cache, you need to     specify a Cache Folder to persist data
+                CachePath = Path.Combine( Environment.GetFolderPath( Environment.SpecialFolder.LocalApplicationData ), "CefSharp\\Cache" ),
+                WindowlessRenderingEnabled = true,
+                BackgroundColor = 0x0
+            };
+
+            //Autoshutdown when closing
+            CefSharpSettings.ShutdownOnExit = true;
+
+            //Perform dependency check to make sure all relevant resources are in our     output directory.
+            Cef.Initialize( settings, performDependencyCheck: true, browserProcessHandler: null );
+
+            RequestContext = new RequestContext( );
+
+            Page = new ChromiumWebBrowser( "", null, RequestContext );
+
+            Page.Size = Host.MainWindow.ClientSize;
+
+            Page.BrowserInitialized += ( sender, args ) =>
+            {
+            };
+            
+            Page.LoadingStateChanged += ( sender, args ) =>
+            {
+                if ( args.IsLoading )
+                    return;
+                
+                ScreenShotQueue.Enqueue( true );
+            };
+
+            if ( _ViewSize == null )
             {
                 _ViewSize = new CVar( "viewsize", "100", true );
                 _Fov = new CVar( "fov", "90" );	// 10 - 170
@@ -304,11 +384,18 @@ namespace SharpQuake
                         Host.FPS = Host.FPSCounter;
                         Host.FPSCounter = 0;
                         Host.LastFPSUpdate = DateTime.Now;
+
+
+                        var task = Page.EvaluateScriptAsync( "UpdateFPS", $"{Host.FPS}" )
+                        .ContinueWith( t =>
+                        {
+                        } );
                     }
 
                     Host.FPSCounter++;
 
-                    Host.DrawingContext.DrawString( 640 - 16 - 10, 10, $"{Host.FPS}", System.Drawing.Color.Yellow );
+                    //Host.DrawingContext.DrawString( 640 - 16 - 10, 10, $"{Host.FPS}", System.Drawing.Color.Yellow );
+                    //Host.DrawingContext.DrawStringNew( 0, 0, "adasd" );
                 }
                 Host.View.UpdatePalette();
                 EndRendering();
@@ -370,6 +457,11 @@ namespace SharpQuake
         // for a few moments
         public void CenterPrint( String str )
         {
+            var task = Host.Screen.Page.EvaluateScriptAsync( "CentrePrint", str.ToUpper() )
+                .ContinueWith( t =>
+                {
+                } );
+            return;
             _CenterString = str;
             CenterTimeOff = _CenterTime.Value;
             _CenterTimeStart = ( Single ) Host.Client.cl.time;
@@ -829,10 +921,152 @@ namespace SharpQuake
             Host.DrawingContext.DrawPic( ( vid.width - pic.width ) / 2, ( vid.height - 48 - pic.height ) / 2, pic );
         }
 
+        private Bitmap LastBitmap
+        {
+            get;
+            set;
+        }
+
         // SCR_DrawConsole
         private void DrawConsole()
         {
-            if( _ConCurrent > 0 )
+            // Remove all from buffer - we only care about most recent
+            // We're using ConcurrentQueue for it's thread safety
+
+            if ( HasRequestedUI && Host.Screen?.Page?.IsBrowserInitialized == true && ( DateTime.Now.Subtract( Host.Console.lastReq ).TotalSeconds >= 0.1 ) )
+            {
+                Host.Console.lastReq = DateTime.Now;
+
+                var tx = Host.Console.sb.ToString( );
+
+                var task = Page.EvaluateScriptAsync( $"ConsolePrint", tx )
+                .ContinueWith( t =>
+                {
+                    Host.Screen.ScreenShotQueue.Enqueue( true );
+                    //sb.Clear( );
+                } );
+
+                //var result = await Host.Screen.Page.EvaluateScriptAsync(  );
+
+                //if ( result.Success )
+                //    Host.Screen.ScreenShotQueue.Enqueue( true );
+            }
+            if ( HasRequestedUI && Page.IsBrowserInitialized )
+            {
+
+                Host.Screen.ScreenShotQueue.Enqueue( true );
+            }
+
+            if ( !HasRequestedUI && Page.IsBrowserInitialized )
+            {
+
+                Host.Console.Print( "Loading UI 'ui/mainmenu.html'\n" );
+
+                var fileBytes = FileSystem.LoadFile( "ui/mainmenu.html" );
+
+                if ( fileBytes != null )
+                {
+                    var html = System.Text.Encoding.UTF8.GetString( fileBytes );
+
+                    HtmlBuffer.Enqueue( html );
+
+                    Host.Console.Print( "Enqueued UI 'ui/mainmenu.html'\n" );
+                    //Page.LoadHtml( html, "http://mainmenu/" 
+                    //Page.Load( "http://mainmenu/" );
+                }
+
+                HasRequestedUI = true;
+            }
+            String htmlData = null;
+
+            if ( HtmlBuffer.TryPeek( out htmlData ) )
+            {
+                if ( HtmlBuffer.TryDequeue( out htmlData ) )
+                {
+                  //  Host.Console.Print( "Applying UI HTML to browser\n" );
+
+                    Page.LoadHtml( htmlData, "http://home" );
+                    //Page.Load( "http://google.com" );
+                }
+            }
+
+            if ( ScreenShotQueue.TryPeek( out var res ) )
+            {
+                if ( ScreenShotQueue.TryDequeue( out var dummy ) )
+                {
+                    // Host.Console.Print( "Requesting UI browser buffer\n" );
+
+                    System.Threading.Tasks.Task.Run( ( ) =>
+                    {
+                        var attempts = 0;
+
+                        Bitmap image = Page.ScreenshotOrNull( );
+
+                        if ( image == null )
+                        {
+                            while ( image == null && attempts < 10 )
+                            {
+                                image = Page.ScreenshotOrNull( );
+                                // Host.Console.Print( $"Retrying request to UI browser buffer {( attempts + 1 )}...\n" );
+                                attempts++;
+                            }
+                        }
+
+                        if ( image != null )
+                        {
+                            BrowserBuffer.Enqueue( image );
+
+                            //Host.Console.Print( "Enqueued UI browser buffer\n" );
+                        }
+                        else
+                        {
+                            //Host.Console.Print( "Failed to capture UI browser buffer\n" );
+                            ScreenShotQueue.Enqueue( true );
+                        }
+                    } );
+                }
+            }
+
+            Bitmap result = null;
+
+            if ( BrowserBuffer.TryPeek( out result ) )
+            {
+                BrowserBuffer.TryDequeue( out result );
+
+                var alreadyMade = LastBitmap != null;
+
+                if ( LastBitmap != null )
+                    LastBitmap.Dispose( );
+
+                //image.Save( "F:\\test.png" );
+                if ( !alreadyMade )
+                {
+                    var id = Host.DrawingContext.LoadTexture( $"_BrowserBuffer_{DateTime.Now.Ticks}", result.Width, result.Height, result, false, false, "screen" );
+
+                    var tid = System.Threading.Thread.CurrentThread.ManagedThreadId;
+
+                    PageTexture = new GLPic( );
+                    PageTexture.width = result.Width;
+                    PageTexture.height = result.Height;
+
+                    //gl = (glpic_t *)pic->pic.data;
+                    PageTexture.texnum = id;
+                    PageTexture.sl = 0;
+                    PageTexture.sh = 1;
+                    PageTexture.tl = 0;
+                    PageTexture.th = 1;
+                    //Host.Console.Print( "Applied UI browser buffer texture\n" );
+                }
+                else
+                {
+                    Host.DrawingContext.Bind( PageTexture.texnum );
+
+                    Host.DrawingContext.UploadBitmap( result, result.Width, result.Height, false, true );
+                }
+                LastBitmap = result;
+            }
+
+            if ( _ConCurrent > 0 )
             {
                 _CopyEverything = true;
                 Host.Console.Draw( ( Int32 ) _ConCurrent, true );
@@ -843,6 +1077,34 @@ namespace SharpQuake
             {
                 Host.Console.DrawNotify();	// only draw notify in game
             }
+
+
+            if ( PageTexture != null )
+            {
+                var pic = PageTexture;
+                var w = Host.Screen.vid.width;
+                var h = Host.Screen.vid.height;
+
+                //Host.DrawingContext.DrawAlphaPic( 0, 0, PageTexture, 0.75f );
+                GL.Disable( EnableCap.AlphaTest );
+                GL.Enable( EnableCap.Blend );
+                GL.Color4( 1f, 1f, 1f, 1f );
+                Host.DrawingContext.Bind( pic.texnum );
+                GL.Begin( PrimitiveType.Quads );
+                GL.TexCoord2( pic.sl, pic.tl );
+                GL.Vertex2( 0, 0 );
+                GL.TexCoord2( pic.sh, pic.tl );
+                GL.Vertex2( w, 0 );
+                GL.TexCoord2( pic.sh, pic.th );
+                GL.Vertex2( w, h );
+                GL.TexCoord2( pic.sl, pic.th );
+                GL.Vertex2( 0, h );
+                GL.End( );
+                GL.Color4( 1f, 1f, 1f, 1f );
+                GL.Enable( EnableCap.AlphaTest );
+                GL.Disable( EnableCap.Blend );
+            }
+
         }
 
         // SCR_DrawCenterString

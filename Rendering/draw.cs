@@ -551,6 +551,10 @@ namespace SharpQuake
             GL.Color3( 1f, 1f, 1f );
         }
 
+        public void DrawStringNew( Int32 x, Int32 y, String str )
+        {
+        }
+
         // Draw_String
         public void DrawString( Int32 x, Int32 y, String str, System.Drawing.Color? color = null )
         {
@@ -977,7 +981,7 @@ Done:
         }
 
         // GL_UploadBitmap
-        private void UploadBitmap( System.Drawing.Bitmap bitmap, Int32 width, Int32 height, System.Boolean mipmap, System.Boolean alpha )
+        public void UploadBitmap( System.Drawing.Bitmap bitmap, Int32 width, Int32 height, System.Boolean mipmap, System.Boolean alpha )
         {
             //bitmap.Save( "F:\\Test.png" );
 

@@ -22,7 +22,9 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
+using CefSharp;
 using SharpQuake.Framework;
 
 namespace SharpQuake
@@ -218,11 +220,11 @@ namespace SharpQuake
         // The typing input line at the bottom should only be drawn if typing is allowed
         public void Draw( Int32 lines, Boolean drawinput )
         {
-            if( lines <= 0 )
+            if ( lines <= 0 )
                 return;
 
             // draw the background
-            Host.DrawingContext.DrawConsoleBackground( lines );
+            //Host.DrawingContext.DrawConsoleBackground( lines );
 
             // draw the text
             _VisLines = lines;
@@ -238,8 +240,8 @@ namespace SharpQuake
 
                 var offset = ( j % _TotalLines ) * _LineWidth;
 
-                for( var x = 0; x < _LineWidth; x++ )
-                    Host.DrawingContext.DrawCharacter( ( x + 1 ) << 3, y, _Text[offset + x] );
+                //for( var x = 0; x < _LineWidth; x++ )
+                   // Host.DrawingContext.DrawCharacter( ( x + 1 ) << 3, y, _Text[offset + x] );
             }
 
             // draw the input prompt, user text, and cursor if desired
@@ -365,9 +367,16 @@ namespace SharpQuake
         /// <summary>
         /// Con_ToggleConsole_f
         /// </summary>
-        public void ToggleConsole_f()
+        public void ToggleConsole_f( )
         {
-            if( Host.Keyboard.Destination == KeyDestination.key_console )
+
+
+            var task = Host.Screen.Page.EvaluateScriptAsync( "ToggleConsole", "" )
+                .ContinueWith( t =>
+                {
+                } );
+
+            if ( Host.Keyboard.Destination == KeyDestination.key_console )
             {
                 if( Host.Client.cls.state == cactive_t.ca_connected )
                 {
@@ -399,6 +408,8 @@ namespace SharpQuake
             }
         }
 
+        public DateTime lastReq;
+        public StringBuilder sb = new StringBuilder( );
         // Con_Print (char *txt)
         //
         // Handles cursor positioning, line wrapping, etc
@@ -463,6 +474,8 @@ namespace SharpQuake
                 {
                     case '\n':
                         _X = 0;
+
+                        sb.Append( "<br />" );
                         break;
 
                     case '\r':
@@ -473,6 +486,7 @@ namespace SharpQuake
                     default:    // display character and advance
                         var y = _Current % _TotalLines;
                         _Text[y * _LineWidth + _X] = ( Char ) ( c | mask );
+                        sb.Append( ( Char ) ( c | mask ) );
                         _X++;
                         if( _X >= _LineWidth )
                             _X = 0;
@@ -515,6 +529,7 @@ namespace SharpQuake
             }
         }
 
+        String lastText;
         // Con_DrawInput
         //
         // The input line scrolls horizontally if typing goes beyond the right edge
@@ -539,11 +554,27 @@ namespace SharpQuake
             // draw it
             var y = _VisLines - 16;
 
-            for( var i = 0; i < _LineWidth; i++ )
-                Host.DrawingContext.DrawCharacter( ( i + 1 ) << 3, _VisLines - 16, Host.Keyboard.Lines[Host.Keyboard.EditLine][offset + i] );
+            //for( var i = 0; i < _LineWidth; i++ )
+            //    Host.DrawingContext.DrawCharacter( ( i + 1 ) << 3, _VisLines - 16, Host.Keyboard.Lines[Host.Keyboard.EditLine][offset + i] );
 
             // remove cursor
             Host.Keyboard.Lines[Host.Keyboard.EditLine][Host.Keyboard.LinePos] = '\0';
+
+
+            var range = Host.Keyboard.Lines[Host.Keyboard.EditLine].ToList( ).GetRange( offset, _LineWidth );
+            var txt = new String( range.ToArray( ) ).Replace( "\0", "" );
+
+            if ( txt != lastText && Host.Screen.Page.IsBrowserInitialized )
+            {
+                var task = Host.Screen.Page.EvaluateScriptAsync( "ConsoleEditLine", txt )
+                .ContinueWith( t =>
+                {
+                    Host.Screen.ScreenShotQueue.Enqueue( true );
+                } );
+
+                lastText = txt;
+            }
+            //
         }
     }
 }

@@ -23,6 +23,7 @@
 using System;
 using System.IO;
 using System.Text;
+using CefSharp;
 using SharpQuake.Framework;
 
 // menu.h
@@ -176,7 +177,7 @@ namespace SharpQuake
         /// </summary>
         public void Print( Int32 cx, Int32 cy, String str )
         {
-            for( var i = 0; i < str.Length; i++ )
+            for( var i = 0; i < str?.Length; i++ )
             {
                 DrawCharacter( cx, cy, str[i] + 128 );
                 cx += 8;
