@@ -30,6 +30,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using SharpFont.Cache;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.BSP;
 using SharpQuake.Framework.IO.WAD;
@@ -635,38 +636,126 @@ namespace SharpQuake.Game.Data.Models
         }
 
         private BaseModelBuffer _modelBuffers;
+        private GLPoly[] bufferSurfaces;
 
         private Int32 _ColinElim;
 
+        private void BuildSurfaces2()
+        {
+            var scale = 1f;
+            var indices = new List<UInt32>( );
+            var verts = new List<BufferVertex>( );
+
+            var surfOffset = 0;
+            for ( var k = 0; k < NumModelSurfaces; k++, surfOffset++ )
+            {
+                var surf = Surfaces[surfOffset];
+
+                var poly = new GLPoly( );
+                poly.FirstIndex = indices.Count;
+                poly.FirstVertex = verts.Count;
+
+                surf.polys = poly;
+
+                var p = surf.polys;
+
+                var baseIndex = p.FirstVertex;
+
+                var pplane = surf.plane;
+                var normal = new Vector3( -pplane.normal.X, -pplane.normal.Z, pplane.normal.Y );
+                
+
+                //for ( var vi = 0; vi < p.numverts; vi++ )
+                //{
+                //    CalcLightmapCoordinates( surf, p, vi );
+                //}
+
+                var tex = surf.texinfo.texture;
+                var invertedScale = ( 1f - scale );
+                //var pplane = surf.plane;
+                var firstVert = new BufferVertex
+                {
+                    Position = new Vector3( -p.verts[0][0] * scale, p.verts[0][2] * scale, p.verts[0][1] * scale ),
+                    //Color = Microsoft.Xna.Framework.Color.White,
+                    UV = new Vector2( p.verts[0][3] * tex.scaleX, p.verts[0][4] * tex.scaleY ) * invertedScale,
+                    //TexCoord2 = new Microsoft.Xna.Framework.Vector2( p.verts[0][5], p.verts[0][6] ) * invertedScale,// texCoord,
+                    //Normal = normal
+                };
+                // [V0, V1, v2] [v0,v2,v3] [V0, V3, V4]
+
+                p.NumFaces = 0;
+
+                for ( var vi = 1; vi < p.numverts - 1; vi++ )
+                {
+                    var v = p.verts[vi];
+                    var pos = new Vector3( -p.verts[vi][0] * scale, p.verts[vi][1] * scale, p.verts[vi][2] * scale );
+                    var nextPos = new Vector3( -p.verts[vi + 1][0] * scale, p.verts[vi + 1][1] * scale, p.verts[vi + 1][2] * scale );
+                    var texCoord = new Vector2( p.verts[vi][3] * tex.scaleX, p.verts[vi][4] * tex.scaleY );
+                    var nextTexCoord = new Vector2( p.verts[vi + 1][3], p.verts[vi + 1][4] * tex.scaleY );
+                    var texCoord2 = new Vector2( p.verts[vi][5] * tex.scaleX, p.verts[vi][6] );
+                    var nextTexCoord2 = new Vector2( p.verts[vi + 1][5], p.verts[vi + 1][6] );
+                    indices.Add( ( UInt32 ) verts.Count );
+
+                    verts.Add( firstVert );
+
+                    indices.Add( ( UInt32 ) verts.Count );
+
+                    verts.Add( new BufferVertex
+                    {
+                        Position = pos,
+                        //Color = Microsoft.Xna.Framework.Color.White,
+                        UV = texCoord * invertedScale,
+                        //TexCoord2 = texCoord2 * invertedScale,
+                        //Normal = normal
+                    } );
+
+                    indices.Add( ( UInt32 ) verts.Count );
+
+
+                    verts.Add( new BufferVertex
+                    {
+                        Position = nextPos,
+                        //Color = Microsoft.Xna.Framework.Color.White,
+                        UV = nextTexCoord * invertedScale,
+                        //TexCoord2 = nextTexCoord2 * invertedScale,
+                        //Normal = normal
+                    } );
+
+                    p.NumFaces++;
+                }
+            }
+
+            VertexBuffer = verts.ToArray( );
+            IndexBuffer = indices.ToArray( );
+        }
         private void BuildSurfaces()
         {
-            var vertexBuffer = new List<BufferVertex>( );
+            //    var vertexBuffer = new List<BufferVertex>( );
 
-            foreach ( var surface in Surfaces )
-            {
-                BuildSurface( vertexBuffer, surface );
-            }
+            //    foreach ( var surface in Surfaces )
+            //    {
+            //        BuildSurface( vertexBuffer, surface );
+            //    }
 
-            var indices = new List<UInt32>( );
-            UInt32 ti = 0;
+            //    var indices = new List<UInt32>( );
+            //    UInt32 ti = 0;
 
-            for ( int vi = 0; vi < vertexBuffer.Count; vi += 3, ti += 3 )
-            {
-                //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 0] ) );
-                //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 1] ) );
-                //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 2] ) );
+            //    for ( int vi = 0; vi < vertexBuffer.Count; vi += 3, ti += 3 )
+            //    {
+            //        //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 0] ) );
+            //        //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 1] ) );
+            //        //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 2] ) );
 
-                //uvs.Add( g.uvs[vi + 0] );
-                //uvs.Add( g.uvs[vi + 1] );
-                //uvs.Add( g.uvs[vi + 2] );
+            //        //uvs.Add( g.uvs[vi + 0] );
+            //        //uvs.Add( g.uvs[vi + 1] );
+            //        //uvs.Add( g.uvs[vi + 2] );
 
-                indices.Add( ti + 2 );
-                indices.Add( ti + 1 );
-                indices.Add( ti + 0 );
-            }
+            //        indices.Add( ti + 2 );
+            //        indices.Add( ti + 1 );
+            //        indices.Add( ti + 0 );
+            //    }
 
-            VertexBuffer = vertexBuffer.ToArray( );
-            IndexBuffer = indices.ToArray( );
+            BuildSurfaces2( );
 
             _modelBuffers = BaseModelBuffer.New( _device, VertexBuffer, IndexBuffer );
         }
@@ -773,7 +862,7 @@ namespace SharpQuake.Game.Data.Models
                 }
             }
             poly.numverts = lnumverts;
-            poly.FirstVertexIndex = vertexBuffer.Count;
+            poly.FirstVertex = vertexBuffer.Count;
 
             for ( var i = 0; i < poly.numverts; i++ )
             {

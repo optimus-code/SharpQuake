@@ -36,6 +36,12 @@ namespace SharpQuake.Renderer.OpenGL.Models
 {
     public class GLModelBuffer : BaseModelBuffer
     {
+        private Int32 VertexArrayID
+        {
+            get;
+            set;
+        }
+
         private Int32 VertexBufferID
         {
             get;
@@ -62,6 +68,10 @@ namespace SharpQuake.Renderer.OpenGL.Models
             GL.EnableClientState( ArrayCap.VertexArray );
             GL.EnableClientState( ArrayCap.IndexArray );
 
+            VertexArrayID = GL.GenVertexArray( );
+
+            GL.BindVertexArray( VertexArrayID );
+
             VertexBufferID = GL.GenBuffer( );
 
             GL.BindBuffer( BufferTarget.ArrayBuffer, VertexBufferID );
@@ -75,10 +85,12 @@ namespace SharpQuake.Renderer.OpenGL.Models
 
 
             GL.BindBuffer( BufferTarget.ArrayBuffer, 0 );
-            GL.BindBuffer( BufferTarget.ElementArrayBuffer, 0 );
+            //GL.BindBuffer( BufferTarget.ElementArrayBuffer, 0 );
 
             GL.DisableClientState( ArrayCap.VertexArray );
             GL.DisableClientState( ArrayCap.IndexArray );
+
+            GL.BindVertexArray( 0 );
         }
 
         public override void Begin( )
@@ -91,11 +103,15 @@ namespace SharpQuake.Renderer.OpenGL.Models
             GL.VertexPointer( 3, VertexPointerType.Float, Marshal.SizeOf<BufferVertex>( ), 0 );
             GL.TexCoordPointer( 2, TexCoordPointerType.Float, Marshal.SizeOf<BufferVertex>( ), Marshal.SizeOf<Vector3>( ) );
 
+            GL.BindBuffer( BufferTarget.ElementArrayBuffer, IndexBufferID );
+
+            GL.BindVertexArray( VertexArrayID );
         }
 
 
         public override void End( )
         {
+            GL.BindVertexArray( 0 );
             GL.DisableClientState( ArrayCap.VertexArray );
             GL.DisableClientState( ArrayCap.TextureCoordArray );
             GL.Disable( EnableCap.Texture2D );
@@ -110,7 +126,8 @@ namespace SharpQuake.Renderer.OpenGL.Models
 
         public override void DrawPoly( GLPoly poly )
         {
-            GL.DrawArrays( PrimitiveType.Triangles, poly.FirstVertexIndex, poly.numverts );
+            //GL.DrawArrays( PrimitiveType.Triangles, poly.FirstVertex, poly.numverts );
+            GL.DrawElementsBaseVertex( PrimitiveType.Polygon, poly.NumFaces, DrawElementsType.UnsignedInt, Indices, poly.FirstVertex );
             //GL.DrawArrays( PrimitiveType.Polygon, poly.FirstVertexIndex, poly.numverts / 3 );
             //if ( poly.numverts == 3 )
             //    GL.DrawArrays( PrimitiveType.Polygon, poly.FirstVertexIndex, 1 );
@@ -123,9 +140,10 @@ namespace SharpQuake.Renderer.OpenGL.Models
         public override void Draw( )
         {
 
-            GL.DrawArrays( PrimitiveType.TriangleStrip, 0, Vertices.Length );
+            //GL.DrawArrays( PrimitiveType.TriangleStrip, 0, Vertices.Length );
 
-
+            //GL.DrawElements( PrimitiveType.Triangles, Indices.Length / 3, DrawElementsType.UnsignedInt, Indices );
+            GL.DrawElements( PrimitiveType.Triangles, Indices.Length, DrawElementsType.UnsignedInt, 0 );
             //GL.DrawArrays( PrimitiveType.Polygon, 0, Vertices.Length / 4 );
 
             //GL.BindBuffer( BufferTarget.ArrayBuffer, VertexBufferID );
