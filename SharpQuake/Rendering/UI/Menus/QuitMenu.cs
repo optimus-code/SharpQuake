@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,9 +23,11 @@
 /// </copyright>
 
 using System;
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.Input;
+using SharpQuake.Sys;
 
 namespace SharpQuake.Rendering.UI
 {
@@ -33,19 +35,22 @@ namespace SharpQuake.Rendering.UI
     {
         private BaseMenu _PrevMenu; // m_quit_prevstate;
 
-        public QuitMenu( MenuFactory menuFactory ) : base( "menu_quit", menuFactory )
+        private readonly IEngine _engine;
+
+        public QuitMenu( IEngine engine, IKeyboardInput keyboard, MenuFactory menus ) : base( "menu_quit", keyboard, menus )
         {
+            _engine = engine;
         }
 
-        public override void Show( Host host )
+        public override void Show( )
         {
-            if ( MenuFactory.CurrentMenu == this )
+            if ( _menus.CurrentMenu == this )
                 return;
 
-            host.Keyboard.Destination = KeyDestination.key_menu;
-            _PrevMenu = MenuFactory.CurrentMenu;
+            _keyboard.Destination = KeyDestination.key_menu;
+            _PrevMenu = _menus.CurrentMenu;
 
-            base.Show( host );
+            base.Show( );
         }
 
         public override void KeyEvent( Int32 key )
@@ -56,15 +61,15 @@ namespace SharpQuake.Rendering.UI
                 case 'n':
                 case 'N':
                     if ( _PrevMenu != null )
-                        _PrevMenu.Show( Host );
+                        _PrevMenu.Show( );
                     else
-                        MenuFactory.CurrentMenu.Hide( );
+                        _menus.CurrentMenu.Hide( );
                     break;
 
                 case 'Y':
                 case 'y':
-                    Host.Keyboard.Destination = KeyDestination.key_console;
-                    Host.Quit_f( null );
+                    _keyboard.Destination = KeyDestination.key_console;
+                    _engine.Quit_f( null );
                     break;
 
                 default:
@@ -74,28 +79,67 @@ namespace SharpQuake.Rendering.UI
 
         public override void Draw( )
         {
-            Host.Menus.DrawTextBox( 0, 0, 38, 23 );
-            Host.Menus.PrintWhite( 16, 12, "  Quake version 1.09 by id Software\n\n" );
-            Host.Menus.PrintWhite( 16, 28, "Programming        Art \n" );
-            Host.Menus.Print( 16, 36, " John Carmack       Adrian Carmack\n" );
-            Host.Menus.Print( 16, 44, " Michael Abrash     Kevin Cloud\n" );
-            Host.Menus.Print( 16, 52, " John Cash          Paul Steed\n" );
-            Host.Menus.Print( 16, 60, " Dave 'Zoid' Kirsch\n" );
-            Host.Menus.PrintWhite( 16, 68, "Design             Biz\n" );
-            Host.Menus.Print( 16, 76, " John Romero        Jay Wilbur\n" );
-            Host.Menus.Print( 16, 84, " Sandy Petersen     Mike Wilson\n" );
-            Host.Menus.Print( 16, 92, " American McGee     Donna Jackson\n" );
-            Host.Menus.Print( 16, 100, " Tim Willits        Todd Hollenshead\n" );
-            Host.Menus.PrintWhite( 16, 108, "Support            Projects\n" );
-            Host.Menus.Print( 16, 116, " Barrett Alexander  Shawn Green\n" );
-            Host.Menus.PrintWhite( 16, 124, "Sound Effects\n" );
-            Host.Menus.Print( 16, 132, " Trent Reznor and Nine Inch Nails\n\n" );
-            Host.Menus.PrintWhite( 16, 140, "Quake is a trademark of Id Software,\n" );
-            Host.Menus.PrintWhite( 16, 148, "inc., (c)1996 Id Software, inc. All\n" );
-            Host.Menus.PrintWhite( 16, 156, "rights reserved. NIN logo is a\n" );
-            Host.Menus.PrintWhite( 16, 164, "registered trademark licensed to\n" );
-            Host.Menus.PrintWhite( 16, 172, "Nothing Interactive, Inc. All rights\n" );
-            Host.Menus.PrintWhite( 16, 180, "reserved. Press y to exit\n" );
+            var textBoxWidth = 38 * _menus.UIScale;
+
+            var width = _menus.Measure( "Quake is a trademark of Id Software, " ) / _menus.UIScale;
+            width /= 2;
+
+            width += 4;
+            //width = (int)( width / 1.75 );
+
+            var adorner = _menus.BuildAdorner( 21, 0, 0, padding: 0, width: width );
+
+            var cW = _menus.CharacterAdvanceHeight( ) / 2;
+            _menus.DrawTextBoxCalc( adorner.LeftPoint - 32 - cW, adorner.TopPoint - 32 - cW, adorner.Width / _menus.UIScale, adorner.TotalHeight + (cW * 2 ) + cW, scale: _menus.UIScale );
+
+            adorner.PrintWhite( "Quake version 1.09 by id Software\n\n", Menus.TextAlignment.Left );
+
+            adorner.PrintWhite( "Programming        Art \n", Menus.TextAlignment.Left );
+            adorner.Print( " John Carmack       Adrian Carmack\n", Menus.TextAlignment.Left );
+            adorner.Print( " Michael Abrash     Kevin Cloud\n", Menus.TextAlignment.Left );
+            adorner.Print( " John Cash          Paul Steed\n", Menus.TextAlignment.Left );
+            adorner.Print( " Dave 'Zoid' Kirsch\n", Menus.TextAlignment.Left );
+
+            adorner.PrintWhite( "Design             Biz\n", Menus.TextAlignment.Left );
+            adorner.Print( " John Romero        Jay Wilbur\n", Menus.TextAlignment.Left );
+            adorner.Print( " Sandy Petersen     Mike Wilson\n", Menus.TextAlignment.Left );
+            adorner.Print( " American McGee     Donna Jackson\n", Menus.TextAlignment.Left );
+            adorner.Print( " Tim Willits        Todd Hollenshead\n", Menus.TextAlignment.Left );
+
+            adorner.PrintWhite( "Support            Projects\n", Menus.TextAlignment.Left );
+            adorner.Print( " Barrett Alexander  Shawn Green\n", Menus.TextAlignment.Left );
+
+            adorner.PrintWhite( "Sound Effects\n", Menus.TextAlignment.Left );
+            adorner.Print( " Trent Reznor and Nine Inch Nails\n\n", Menus.TextAlignment.Left );
+
+            adorner.PrintWhite( "Quake is a trademark of Id Software,\n", Menus.TextAlignment.Left );
+            adorner.PrintWhite( "inc., (c)1996 Id Software, inc. All\n", Menus.TextAlignment.Left );
+            adorner.PrintWhite( "rights reserved. NIN logo is a\n", Menus.TextAlignment.Left );
+            adorner.PrintWhite( "registered trademark licensed to\n", Menus.TextAlignment.Left );
+            adorner.PrintWhite( "Nothing Interactive, Inc. All rights\n", Menus.TextAlignment.Left );
+            adorner.PrintWhite( "reserved. Press y to exit\n", Menus.TextAlignment.Left );
+
+            //_menus.PrintWhite( 16, 12, "  Quake version 1.09 by id Software\n\n" );
+            //_menus.PrintWhite( 16, 28, "Programming        Art \n" );
+            //_menus.Print( 16, 36, " John Carmack       Adrian Carmack\n" );
+            //_menus.Print( 16, 44, " Michael Abrash     Kevin Cloud\n" );
+            //_menus.Print( 16, 52, " John Cash          Paul Steed\n" );
+            //_menus.Print( 16, 60, " Dave 'Zoid' Kirsch\n" );
+            //_menus.PrintWhite( 16, 68, "Design             Biz\n" );
+            //_menus.Print( 16, 76, " John Romero        Jay Wilbur\n" );
+            //_menus.Print( 16, 84, " Sandy Petersen     Mike Wilson\n" );
+            //_menus.Print( 16, 92, " American McGee     Donna Jackson\n" );
+            //_menus.Print( 16, 100, " Tim Willits        Todd Hollenshead\n" );
+            //_menus.PrintWhite( 16, 108, "Support            Projects\n" );
+            //_menus.Print( 16, 116, " Barrett Alexander  Shawn Green\n" );
+            //_menus.PrintWhite( 16, 124, "Sound Effects\n" );
+            //_menus.Print( 16, 132, " Trent Reznor and Nine Inch Nails\n\n" );
+            //_menus.PrintWhite( 16, 140, "Quake is a trademark of Id Software,\n" );
+            //_menus.PrintWhite( 16, 148, "inc., (c)1996 Id Software, inc. All\n" );
+            //_menus.PrintWhite( 16, 156, "rights reserved. NIN logo is a\n" );
+            //_menus.PrintWhite( 16, 164, "registered trademark licensed to\n" );
+            //_menus.PrintWhite( 16, 172, "Nothing Interactive, Inc. All rights\n" );
+            //_menus.PrintWhite( 16, 180, "reserved. Press y to exit\n" );
         }
     }
 }

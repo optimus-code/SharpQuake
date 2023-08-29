@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,6 +23,8 @@
 /// </copyright>
 
 using SharpQuake.Framework;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 using System;
 using System.Text;
 
@@ -40,15 +42,24 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private HudResources _resources;
 
-        public Frags( Host host ) : base( host )
+        private readonly Scr _screen;
+        private readonly Vid _video;
+        private readonly ClientState _clientState;
+        private readonly VideoState _videoState;
+
+        public Frags( Scr screen, Vid video, ClientState clientState, VideoState videoState )
         {
+            _screen = screen;
+            _video = video;
+            _clientState = clientState;
+            _videoState = videoState;
         }
 
         public override void Initialise( )
         {
             base.Initialise( );
 
-            _resources = _host.Screen.HudResources;
+            _resources = _screen.HudResources;
 
             HasInitialised = true;
         }
@@ -66,14 +77,14 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
             // draw the text
             var l = _resources._ScoreBoardLines <= 4 ? _resources._ScoreBoardLines : 4;
             Int32 xofs, x = 23;
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             if ( cl.gametype == ProtocolDef.GAME_DEATHMATCH )
                 xofs = 0;
             else
-                xofs = ( _host.Screen.vid.width - 320 ) >> 1;
+                xofs = ( _videoState.Data.width - 320 ) >> 1;
 
-            var y = _host.Screen.vid.height - HudResources.SBAR_HEIGHT - 23;
+            var y = _videoState.Data.height - HudResources.SBAR_HEIGHT - 23;
 
             for ( var i = 0; i < l; i++ )
             {
@@ -88,8 +99,8 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
                 top = _resources.ColorForMap( top );
                 bottom = _resources.ColorForMap( bottom );
 
-                _host.Video.Device.Graphics.FillUsingPalette( xofs + x * 8 + 10, y, 28, 4, top );
-                _host.Video.Device.Graphics.FillUsingPalette( xofs + x * 8 + 10, y + 4, 28, 3, bottom );
+                _video.Device.Graphics.FillUsingPalette( xofs + x * 8 + 10, y, 28, 4, top );
+                _video.Device.Graphics.FillUsingPalette( xofs + x * 8 + 10, y + 4, 28, 3, bottom );
 
                 // draw number
                 var f = s.frags;

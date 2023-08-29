@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,11 +22,8 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
-using SharpQuake.Game.World;
-using SharpQuake.Renderer;
+using SharpQuake.Networking.Client;
 using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace SharpQuake.Rendering.Environment
 {
@@ -38,11 +35,11 @@ namespace SharpQuake.Rendering.Environment
             private set;
         }
 
-        private readonly Host _host;
+        private readonly ClientState _clientState;
 
-        public Sky( Host host )
+        public Sky( ClientState clientState )
         {
-            _host = host;
+            _clientState = clientState;
         }
 
         public void Identify( )
@@ -50,7 +47,7 @@ namespace SharpQuake.Rendering.Environment
             // identify sky texture
             TextureNumber = -1;
             //_MirrorTextureNum = -1;
-            var world = _host.Client.cl.worldmodel;
+            var world = _clientState.Data.worldmodel;
             for ( var i = 0; i < world.NumTextures; i++ )
             {
                 if ( world.Textures[i] == null )

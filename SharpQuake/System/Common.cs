@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,8 +23,12 @@
 /// </copyright>
 
 using System;
+using System.Security.Cryptography;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.IO;
+using SharpQuake.Framework.Logging;
+using SharpQuake.Sys;
 
 //
 // Source: common.h + common.c
@@ -62,7 +66,7 @@ namespace SharpQuake
         {
             get
             {
-                return MainWindow.Host.Cvars.Registered.Get<Boolean>( );
+                return Cvars.Registered.Get<Boolean>( );
             }
         }
 
@@ -95,43 +99,33 @@ namespace SharpQuake
         private GameKind _GameKind; // qboolean		standard_quake = true, rogue, hipnotic;
 
 
-        // Instances
-        private MainWindow MainWindow
+        private readonly IConsoleLogger _logger;
+        private readonly QuakeParameters _parameters;
+        private readonly ClientVariableFactory _cvars;
+        private readonly CommandFactory _commands;
+
+        public Common( IConsoleLogger logger, QuakeParameters parameters, ClientVariableFactory cvars, CommandFactory commands )
         {
-            get;
-            set;
+            _logger = logger;
+            _parameters = parameters;
+            _cvars = cvars;
+            _commands = commands;
         }
 
         // void COM_Init (char *path)
-        public void Initialise( MainWindow mainWindow, String path, String[] argv )
+        public void Initialise( )
         {
-            MainWindow = mainWindow;
+            CommandLine.Args = _parameters.argv;
 
-            CommandLine.Args = argv;
+            Cvars.Registered = _cvars.Add( "registered", false );
+            Cvars.CmdLine = _cvars.Add( "cmdline", "0", ClientVariableFlags.Server );
 
-            mainWindow.Host.Cvars.Registered = mainWindow.Host.CVars.Add( "registered", false );
-            mainWindow.Host.Cvars.CmdLine = mainWindow.Host.CVars.Add( "cmdline", "0", ClientVariableFlags.Server );
+            _commands.Add( "path", FileSystem.Path_f );
 
-            MainWindow.Host.Commands.Add( "path", FileSystem.Path_f );
-
-            CommandLine.Init( path, argv );
-            FileSystem.InitFileSystem( MainWindow.Host.Parameters );
+            CommandLine.Init( _parameters.basedir, _parameters.argv );
+            FileSystem.InitFileSystem( _parameters );
 
             CheckRegistered( );
-        }
-
-        // void COM_InitArgv (int argc, char **argv)
-        public void InitArgv( String[] argv )
-        {
-            CommandLine.InitArgv( argv );
-
-            _GameKind = GameKind.StandardQuake;
-
-            if ( CommandLine.HasParam( "-rogue" ) )
-                _GameKind = GameKind.Rogue;
-
-            if ( CommandLine.HasParam( "-hipnotic" ) )
-                _GameKind = GameKind.Hipnotic;
         }
 
         // COM_CheckRegistered
@@ -147,7 +141,7 @@ namespace SharpQuake
             var buf = FileSystem.LoadFile( "gfx/pop.lmp" );
             if ( buf == null || buf.Length < 256 )
             {
-                MainWindow.Host.Console.Print( "Playing shareware version.\n" );
+                _logger.Print( "Playing shareware version.\n" );
                 if ( FileSystem._IsModified )
                     Utilities.Error( "You must have the registered version to use modified games" );
                 return;
@@ -161,10 +155,10 @@ namespace SharpQuake
                     Utilities.Error( "Corrupted data file." );
             }
 
-            MainWindow.Host.CVars.Set( "cmdline", CommandLine._Args );
-            MainWindow.Host.CVars.Set( "registered", true );
+            _cvars.Set( "cmdline", CommandLine._Args );
+            _cvars.Set( "registered", true );
             FileSystem._StaticRegistered = true;
-            MainWindow.Host.Console.Print( "Playing registered version.\n" );
+            _logger.Print( "Playing registered version.\n" );
         }
     }
 }

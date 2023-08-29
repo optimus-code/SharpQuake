@@ -24,6 +24,7 @@
 
 using System;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Mathematics;
 
 namespace SharpQuake.Game.Rendering.Memory
 {
@@ -37,8 +38,8 @@ namespace SharpQuake.Game.Rendering.Memory
         public Int32 firstedge;	// look up in model->surfedges[], negative numbers
         public Int32 numedges;	// are backwards edges
 
-        public Int16[] texturemins; //[2];
-        public Int16[] extents; //[2];
+        public Vector2Int16 texturemins; //[2];
+        public Vector2Int16 extents; //[2];
 
         public Int32 light_s, light_t;	// gl lightmap coordinates
 
@@ -64,8 +65,8 @@ namespace SharpQuake.Game.Rendering.Memory
 
         public MemorySurface( )
         {
-            texturemins = new Int16[2];
-            extents = new Int16[2];
+            texturemins = new Vector2Int16();
+            extents = new Vector2Int16();
             styles = new Byte[BspDef.MAXLIGHTMAPS];
             cached_light = new Int32[BspDef.MAXLIGHTMAPS];
             // samples is allocated when needed

@@ -76,7 +76,7 @@ namespace SharpQuake.Renderer.Textures
             PicturePool = new Dictionary<String, BasePicture>( );
         }
 
-        public static BasePicture FromBuffer( BaseDevice device, ByteArraySegment buffer, Int32 width, Int32 height, String identifier = null, String filter = "GL_LINEAR_MIPMAP_NEAREST", Boolean ignoreAtlas = false )
+        public static BasePicture FromBuffer( BaseDevice device, ByteArraySegment buffer, Int32 width, Int32 height, String identifier = null, String filter = "GL_LINEAR_MIPMAP_NEAREST", Boolean ignoreAtlas = false, Boolean preservePixelBuffer = false )
         {
             if ( PicturePool.ContainsKey( identifier ) )
                 return PicturePool[identifier];
@@ -89,12 +89,26 @@ namespace SharpQuake.Renderer.Textures
             if ( !ignoreAtlas && picture.Width < 64 && picture.Height < 64 )
                 picture.Texture = device.TextureAtlas.Add( buffer, picture );
             else
-                picture.Texture = BaseTexture.FromBuffer( device, picture, buffer, filter );
+                picture.Texture = BaseTexture.FromBuffer( device, picture, buffer, filter, preservePixelBuffer: preservePixelBuffer );
 
             return picture;
         }
 
-        public static BasePicture FromFile( BaseDevice device, String path, String filter = "GL_LINEAR_MIPMAP_NEAREST", Boolean ignoreAtlas = false )
+        public static BasePicture FromBuffer( BaseDevice device, UInt32[] buffer, Int32 width, Int32 height, String identifier = null, String filter = "GL_LINEAR_MIPMAP_NEAREST", Boolean preservePixelBuffer = false )
+        {
+            if ( PicturePool.ContainsKey( identifier ) )
+                return PicturePool[identifier];
+
+            var picture = new BasePicture( );
+            picture.Width = width;
+            picture.Height = height;
+            picture.Identifier = identifier;
+            picture.Texture = BaseTexture.FromBuffer( device, picture, buffer, filter, preservePixelBuffer: preservePixelBuffer );
+
+            return picture;
+        }
+
+        public static BasePicture FromFile( BaseDevice device, String path, String filter = "GL_LINEAR_MIPMAP_NEAREST", Boolean ignoreAtlas = false, Boolean preservePixelBuffer = false )
         {
             if ( PicturePool.ContainsKey( path ) )
                 return PicturePool[path];
@@ -115,7 +129,7 @@ namespace SharpQuake.Renderer.Textures
 
                     var headerSize = Marshal.SizeOf( typeof( WadPicHeader ) );
 
-                    return FromBuffer( device, new ByteArraySegment( data, headerSize ), ( Int32 ) header.width, ( Int32 ) header.height, path, filter, ignoreAtlas );
+                    return FromBuffer( device, new ByteArraySegment( data, headerSize ), ( Int32 ) header.width, ( Int32 ) header.height, path, filter, ignoreAtlas, preservePixelBuffer );
 
                 case "jpg":
                 case "bmp":

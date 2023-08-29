@@ -23,6 +23,7 @@
 /// </copyright>
 
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace SharpQuake.Framework
@@ -33,8 +34,11 @@ namespace SharpQuake.Framework
     [StructLayout( LayoutKind.Sequential, Pack = 1 )]
     public struct trivertx_t
     {
-        [MarshalAs( UnmanagedType.ByValArray, SizeConst = 3 )]
-        public Byte[] v; // [3];
+        //[MarshalAs( UnmanagedType.ByValArray, SizeConst = 3 )]
+        //public Byte[] v; // [3];
+        public Byte X;
+        public Byte Y;
+        public Byte Z;
         public Byte lightnormalindex;
 
         public static Int32 SizeInBytes = Marshal.SizeOf( typeof( trivertx_t ) );
@@ -44,8 +48,18 @@ namespace SharpQuake.Framework
         /// </summary>
         public void Init( )
         {
-            if ( v == null )
-                v = new Byte[3];
+            //if ( v == null )
+            //    v = new Byte[3];
+        }
+
+        public static trivertx_t FromBR( BinaryReader br )
+        {
+            var vert = new trivertx_t( );
+            vert.X = br.ReadByte( );
+            vert.Y = br.ReadByte( );
+            vert.Z = br.ReadByte( );
+            vert.lightnormalindex = br.ReadByte( );
+            return vert;
         }
     } // trivertx_t;
 }

@@ -103,6 +103,11 @@ namespace SharpQuake.Framework
                 _Converter.LittleFloat( src[1] ), _Converter.LittleFloat( src[2] ) );
         }
 
+        public static Vector3 LittleVector3( Vector3 src )
+        {
+            return new Vector3( _Converter.LittleFloat( src.X ), _Converter.LittleFloat( src.Y ), _Converter.LittleFloat( src.Z ) );
+        }
+
         public static Vector4 LittleVector4( Single[] src, Int32 offset )
         {
             return new Vector4( _Converter.LittleFloat( src[offset + 0] ),

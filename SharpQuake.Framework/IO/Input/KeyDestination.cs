@@ -30,6 +30,7 @@ namespace SharpQuake.Framework.IO.Input
         key_game,
         key_console,
         key_message,
-        key_menu
+        key_menu,
+        Any
     }
 }

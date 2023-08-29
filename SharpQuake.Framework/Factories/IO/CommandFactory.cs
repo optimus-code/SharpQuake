@@ -102,11 +102,11 @@ namespace SharpQuake.Framework.Factories.IO
         //
         // A complete command line has been parsed, so try to execute it
         // FIXME: lookupnoadd the token to speed search?
-        public Boolean ExecuteString( String text, CommandSource source )
+        public Boolean ExecuteString( String text, CommandSource source, client_t client = null )
         {
             var handled = false;
 
-            var msg = CommandMessage.FromString( text, source );
+            var msg = CommandMessage.FromString( text, source, client );
 
             // execute the command line
             if ( msg == null )
@@ -127,7 +127,7 @@ namespace SharpQuake.Framework.Factories.IO
                 else
                 {
                     if ( !Cvars.HandleCommand( msg ) )
-                        ConsoleWrapper.Print( $"Unknown command \"{msg.Name}\"\n" );
+                        ConsoleWrapper.Print( $"^2Unknown command ^8\"{msg.Name}\"^0\n" );
                 }
             }
 

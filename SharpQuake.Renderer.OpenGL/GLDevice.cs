@@ -25,9 +25,12 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
+using System.Net.Sockets;
 using OpenTK.Graphics.OpenGL;
+using SharpFont;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO;
 using SharpQuake.Framework.Mathematics;
@@ -51,6 +54,8 @@ namespace SharpQuake.Renderer.OpenGL
             set;
         }
 
+        private OpenTK.Matrix4 Projection;
+        private OpenTK.Matrix4 View;
         private OpenTK.Matrix4 WorldMatrix; // r_world_matrix
 
         public GLDevice( OpenTK.GameWindow form, OpenTK.DisplayDevice openTKDevice )
@@ -62,30 +67,31 @@ namespace SharpQuake.Renderer.OpenGL
 				  typeof( GLAliasModel ),
 				  typeof( GLAliasModelDesc ),
 				  typeof( GLTexture ), 
-                  typeof( GLTextureDesc ) )
+                  typeof( GLTextureDesc ),
+                  typeof( GLModelBuffer ) )
         {
             Form = form;
             OpenTKDevice = openTKDevice;
 
-            TextureFilters = new GLTextureFilter[]
+            TextureFilters = new Dictionary<String, BaseTextureFilter>
             {
-                new GLTextureFilter( "GL_NEAREST", TextureMinFilter.Nearest, TextureMagFilter.Nearest ),
-                new GLTextureFilter( "GL_LINEAR", TextureMinFilter.Linear, TextureMagFilter.Linear ),
-                new GLTextureFilter( "GL_NEAREST_MIPMAP_NEAREST", TextureMinFilter.NearestMipmapNearest, TextureMagFilter.Nearest ),
-                new GLTextureFilter( "GL_LINEAR_MIPMAP_NEAREST", TextureMinFilter.LinearMipmapNearest, TextureMagFilter.Linear ),
-                new GLTextureFilter( "GL_NEAREST_MIPMAP_LINEAR", TextureMinFilter.NearestMipmapLinear, TextureMagFilter.Nearest ),
-                new GLTextureFilter( "GL_LINEAR_MIPMAP_LINEAR", TextureMinFilter.LinearMipmapLinear, TextureMagFilter.Linear )
+                { "GL_NEAREST", new GLTextureFilter( "GL_NEAREST", TextureMinFilter.Nearest, TextureMagFilter.Nearest ) },
+                { "GL_LINEAR", new GLTextureFilter( "GL_LINEAR", TextureMinFilter.Linear, TextureMagFilter.Linear ) },
+                { "GL_NEAREST_MIPMAP_NEAREST", new GLTextureFilter( "GL_NEAREST_MIPMAP_NEAREST", TextureMinFilter.NearestMipmapNearest, TextureMagFilter.Nearest ) },
+                { "GL_LINEAR_MIPMAP_NEAREST", new GLTextureFilter( "GL_LINEAR_MIPMAP_NEAREST", TextureMinFilter.LinearMipmapNearest, TextureMagFilter.Linear ) },
+                { "GL_NEAREST_MIPMAP_LINEAR", new GLTextureFilter( "GL_NEAREST_MIPMAP_LINEAR", TextureMinFilter.NearestMipmapLinear, TextureMagFilter.Nearest ) },
+                { "GL_LINEAR_MIPMAP_LINEAR", new GLTextureFilter( "GL_LINEAR_MIPMAP_LINEAR", TextureMinFilter.LinearMipmapLinear, TextureMagFilter.Linear ) }
             };
 
-            BlendModes = new GLTextureBlendMode[]
+            BlendModes = new Dictionary<String, BaseTextureBlendMode>
             {
-                new GLTextureBlendMode( "GL_MODULATE", TextureEnvMode.Modulate ),
-                new GLTextureBlendMode( "GL_ADD", TextureEnvMode.Add ),
-                new GLTextureBlendMode( "GL_REPLACE", TextureEnvMode.Replace ),
-                new GLTextureBlendMode( "GL_DECAL",  TextureEnvMode.Decal ),
-                new GLTextureBlendMode( "GL_REPLACE_EXT", TextureEnvMode.ReplaceExt ),
-                new GLTextureBlendMode( "GL_TEXTURE_ENV_BIAS_SGIX", TextureEnvMode.TextureEnvBiasSgix ),
-                new GLTextureBlendMode( "GL_COMBINE", TextureEnvMode.Combine )
+                { "GL_MODULATE", new GLTextureBlendMode( "GL_MODULATE", TextureEnvMode.Modulate ) },
+                { "GL_ADD", new GLTextureBlendMode( "GL_ADD", TextureEnvMode.Add ) },
+                { "GL_REPLACE", new GLTextureBlendMode( "GL_REPLACE", TextureEnvMode.Replace ) },
+                { "GL_DECAL", new GLTextureBlendMode( "GL_DECAL",  TextureEnvMode.Decal ) },
+                { "GL_REPLACE_EXT", new GLTextureBlendMode( "GL_REPLACE_EXT", TextureEnvMode.ReplaceExt ) },
+                { "GL_TEXTURE_ENV_BIAS_SGIX", new GLTextureBlendMode( "GL_TEXTURE_ENV_BIAS_SGIX", TextureEnvMode.TextureEnvBiasSgix ) },
+                { "GL_COMBINE", new GLTextureBlendMode( "GL_COMBINE", TextureEnvMode.Combine ) }
             };
 
             PixelFormats = new GLPixelFormat[]
@@ -280,8 +286,13 @@ namespace SharpQuake.Renderer.OpenGL
 
         }
 
+        float rads = 0.0174533f;
+
         public override void Setup3DScene( System.Boolean cull, refdef_t renderDef, System.Boolean isEnvMap )
         {
+            //GL.ClearColor( Color.Black );
+            //GL.Clear( ClearBufferMask.DepthBufferBit | ClearBufferMask.ColorBufferBit );
+
             //
             // set up viewpoint
             //
@@ -315,21 +326,30 @@ namespace SharpQuake.Renderer.OpenGL
 
             var screenaspect = ( Single ) renderDef.vrect.width / renderDef.vrect.height;
 
-            MYgluPerspective( renderDef.fov_y, screenaspect, 4, 4096 );
+            BuildProjectionMatrix( renderDef.fov_y, screenaspect, 4, 4096 );
 
             GL.CullFace( CullFaceMode.Front );
 
             GL.MatrixMode( MatrixMode.Modelview );
             GL.LoadIdentity( );
 
-            GL.Rotate( -90f, 1, 0, 0 );	    // put Z going up
-            GL.Rotate( 90f, 0, 0, 1 );	    // put Z going up
-            GL.Rotate( -renderDef.viewangles.Z, 1, 0, 0 );
-            GL.Rotate( -renderDef.viewangles.X, 0, 1, 0 );
-            GL.Rotate( -renderDef.viewangles.Y, 0, 0, 1 );
-            GL.Translate( -renderDef.vieworg.X, -renderDef.vieworg.Y, -renderDef.vieworg.Z );
+            BuildViewMatrix( renderDef );
 
-            GL.GetFloat( GetPName.ModelviewMatrix, out WorldMatrix );
+            // Apply our custom matrix instead of doing transforms via deprecated calls
+            GL.MatrixMode( MatrixMode.Projection );
+            GL.LoadMatrix( ref Projection );
+
+            GL.MatrixMode( MatrixMode.Modelview );
+            GL.LoadMatrix( ref View );
+
+            // This is the old code which introduces additional latency as GetFloat communicates with GPU
+            //GL.Rotate( -90f, 1, 0, 0 );	    // put Z going up
+            //GL.Rotate( 90f, 0, 0, 1 );	    // put Z going up
+            //GL.Rotate( -renderDef.viewangles.Z, 1, 0, 0 );
+            //GL.Rotate( -renderDef.viewangles.X, 0, 1, 0 );
+            //GL.Rotate( -renderDef.viewangles.Y, 0, 0, 1 );
+            //GL.Translate( -renderDef.vieworg.X, -renderDef.vieworg.Y, -renderDef.vieworg.Z );
+            //GL.GetFloat( GetPName.ModelviewMatrix, out WorldMatrix );
 
             //
             // set drawing parms
@@ -344,15 +364,38 @@ namespace SharpQuake.Renderer.OpenGL
             GL.Enable( EnableCap.DepthTest );
         }
 
-        private void MYgluPerspective( Double fovy, Double aspect, Double zNear, Double zFar )
+        /// <summary>
+        /// Build view matrix
+        /// </summary>
+        /// <remarks>
+        /// (Used instead of legacy GL calls as glGetFloat adds unneeded overhead on CPU and GPU, GL transforms are deprecated in newer GL)
+        /// </remarks>
+        /// <param name="renderDef"></param>
+        private void BuildViewMatrix( refdef_t renderDef )
         {
-            var ymax = zNear * Math.Tan( fovy * Math.PI / 360.0 );
-            var ymin = -ymax;
+            View =
+                OpenTK.Matrix4.CreateTranslation( new OpenTK.Vector3( -renderDef.vieworg.X, -renderDef.vieworg.Y, -renderDef.vieworg.Z ) ) *
+                OpenTK.Matrix4.CreateRotationZ( MathHelper.DegreesToRadians( -renderDef.viewangles.Y ) ) *
+                OpenTK.Matrix4.CreateRotationY( MathHelper.DegreesToRadians( -renderDef.viewangles.X ) ) *
+                OpenTK.Matrix4.CreateRotationX( MathHelper.DegreesToRadians( -renderDef.viewangles.Z ) ) *
+                OpenTK.Matrix4.CreateRotationZ( MathHelper.DegreesToRadians( 90f ) ) * // put Z going up
+                OpenTK.Matrix4.CreateRotationX( MathHelper.DegreesToRadians( -90f ) ); // put Z going up
 
-            var xmin = ymin * aspect;
-            var xmax = ymax * aspect;
+            WorldMatrix = View * Projection;
+        }
 
-            GL.Frustum( xmin, xmax, ymin, ymax, zNear, zFar );
+        private void BuildProjectionMatrix( Single fovy, Single aspect, Single zNear, Single zFar )
+        {
+            // Use Matrix operations instead of the deprecated glFrustum function
+            Projection = OpenTK.Matrix4.CreatePerspectiveFieldOfView( MathHelper.DegreesToRadians( fovy ), aspect, zNear, zFar );
+
+            //var ymax = zNear * Math.Tan( fovy * Math.PI / 360.0 );
+            //var ymin = -ymax;
+
+            //var xmin = ymin * aspect;
+            //var xmax = ymax * aspect;
+
+            //GL.Frustum( xmin, xmax, ymin, ymax, zNear, zFar );
         }
 
         public override void Clear( System.Boolean zTrick, Single clear )

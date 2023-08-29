@@ -9,6 +9,7 @@ using SharpQuake.Game.Rendering.Textures;
 using System.Text;
 using System.IO;
 using SharpQuake.Framework.IO;
+using System.Diagnostics;
 
 namespace SharpQuake.Game.Data.Models
 {
@@ -157,6 +158,8 @@ namespace SharpQuake.Game.Data.Models
 
             Header.frames = new maliasframedesc_t[Header.numframes];
 
+            var br = new BinaryReader( new MemoryStream( buffer ) );
+
             for ( var i = 0; i < numframes; i++ )
             {
                 var frametype = ( aliasframetype_t ) BitConverter.ToInt32( buffer, framesOffset );
@@ -164,11 +167,11 @@ namespace SharpQuake.Game.Data.Models
 
                 if ( frametype == aliasframetype_t.ALIAS_SINGLE )
                 {
-                    framesOffset = LoadAliasFrame( new ByteArraySegment( buffer, framesOffset ), ref Header.frames[i] );
+                    framesOffset = LoadAliasFrame( framesOffset, br, ref Header.frames[i] );
                 }
                 else
                 {
-                    framesOffset = LoadAliasGroup( new ByteArraySegment( buffer, framesOffset ), ref Header.frames[i] );
+                    framesOffset = LoadAliasGroup( framesOffset, br, ref Header.frames[i] );
                 }
             }
 
@@ -287,9 +290,12 @@ namespace SharpQuake.Game.Data.Models
         /// Mod_LoadAliasFrame
         /// </summary>
         /// <returns>Offset of next data block in source byte array</returns>
-        private Int32 LoadAliasFrame( ByteArraySegment pin, ref maliasframedesc_t frame )
+        private Int32 LoadAliasFrame( Int32 startOffset, BinaryReader br, ref maliasframedesc_t frame )
         {
-            var pdaliasframe = Utilities.BytesToStructure<daliasframe_t>( pin.Data, pin.StartIndex );
+            br.BaseStream.Seek( startOffset, SeekOrigin.Begin );
+
+            var pdaliasframe = daliasframe_t.FromBR( br ); // Use BinaryReader as less allocations and faster!
+            //var pdaliasframe = Utilities.BytesToStructure<daliasframe_t>( pin.Data, pin.StartIndex );
 
             frame.name = Utilities.GetString( pdaliasframe.name );
             frame.firstpose = PoseNum;
@@ -297,19 +303,35 @@ namespace SharpQuake.Game.Data.Models
             frame.bboxmin.Init( );
             frame.bboxmax.Init( );
 
-            for ( var i = 0; i < 3; i++ )
-            {
-                // these are byte values, so we don't have to worry about
-                // endianness
-                frame.bboxmin.v[i] = pdaliasframe.bboxmin.v[i];
-                frame.bboxmax.v[i] = pdaliasframe.bboxmax.v[i];
-            }
+            // these are byte values, so we don't have to worry about
+            // endianness
+            frame.bboxmin.X = pdaliasframe.bboxmin.X;
+            frame.bboxmin.Y = pdaliasframe.bboxmin.Y;
+            frame.bboxmin.Z = pdaliasframe.bboxmin.Z;
 
+            frame.bboxmax.X = pdaliasframe.bboxmax.X;
+            frame.bboxmax.Y = pdaliasframe.bboxmax.Y;
+            frame.bboxmax.Z = pdaliasframe.bboxmax.Z;
+
+            //for ( var i = 0; i < 3; i++ )
+            //{
+            //    // these are byte values, so we don't have to worry about
+            //    // endianness
+            //    frame.bboxmin.v[i] = pdaliasframe.bboxmin.v[i];
+            //    frame.bboxmax.v[i] = pdaliasframe.bboxmax.v[i];
+            //}
+
+            // Switched from native pinning to BinaryReader as it results in
+            // more performant code with less GC allocations
             var verts = new trivertx_t[Header.numverts];
-            var offset = pin.StartIndex + daliasframe_t.SizeInBytes; //pinframe = (trivertx_t*)(pdaliasframe + 1);
+            var offset = startOffset + daliasframe_t.SizeInBytes; //pinframe = (trivertx_t*)(pdaliasframe + 1);
+
+            br.BaseStream.Seek( offset, SeekOrigin.Begin );
+
             for ( var i = 0; i < verts.Length; i++, offset += trivertx_t.SizeInBytes )
             {
-                verts[i] = Utilities.BytesToStructure<trivertx_t>( pin.Data, offset );
+                verts[i] = trivertx_t.FromBR( br );
+                //verts[i] = Utilities.BytesToStructure<trivertx_t>( pin.Data, offset );
             }
             _PoseVerts[PoseNum] = verts;
             PoseNum++;
@@ -321,25 +343,41 @@ namespace SharpQuake.Game.Data.Models
         /// Mod_LoadAliasGroup
         /// </summary>
         /// <returns>Offset of next data block in source byte array</returns>
-        private Int32 LoadAliasGroup( ByteArraySegment pin, ref maliasframedesc_t frame )
+        private Int32 LoadAliasGroup( Int32 startOffset, BinaryReader br, ref maliasframedesc_t frame )
         {
-            var offset = pin.StartIndex;
-            var pingroup = Utilities.BytesToStructure<daliasgroup_t>( pin.Data, offset );
+            var offset = startOffset;
+            br.BaseStream.Seek( offset, SeekOrigin.Begin );
+
+            var pingroup = daliasgroup_t.FromBR( br );
+            //var pingroup = Utilities.BytesToStructure<daliasgroup_t>( pin.Data, offset );
             var numframes = EndianHelper.LittleLong( pingroup.numframes );
 
             frame.Init( );
             frame.firstpose = PoseNum;
             frame.numposes = numframes;
 
-            for ( var i = 0; i < 3; i++ )
-            {
-                // these are byte values, so we don't have to worry about endianness
-                frame.bboxmin.v[i] = pingroup.bboxmin.v[i];
-                frame.bboxmin.v[i] = pingroup.bboxmax.v[i];
-            }
+            // these are byte values, so we don't have to worry about endianness
+            frame.bboxmin.X = pingroup.bboxmin.X;
+            frame.bboxmin.Y = pingroup.bboxmin.Y;
+            frame.bboxmin.Z = pingroup.bboxmin.Z;
+
+            frame.bboxmax.X = pingroup.bboxmax.X;
+            frame.bboxmax.Y = pingroup.bboxmax.Y;
+            frame.bboxmax.Z = pingroup.bboxmax.Z;
+
+            //for ( var i = 0; i < 3; i++ )
+            //{
+            //    // these are byte values, so we don't have to worry about endianness
+            //    frame.bboxmin.v[i] = pingroup.bboxmin.v[i];
+            //    frame.bboxmin.v[i] = pingroup.bboxmax.v[i];
+            //}
 
             offset += daliasgroup_t.SizeInBytes;
-            var pin_intervals = Utilities.BytesToStructure<daliasinterval_t>( pin.Data, offset ); // (daliasinterval_t*)(pingroup + 1);
+
+            br.BaseStream.Seek( offset, SeekOrigin.Begin );
+
+            //var pin_intervals = Utilities.BytesToStructure<daliasinterval_t>( pin.Data, offset ); // (daliasinterval_t*)(pingroup + 1);
+            var pin_intervals = daliasinterval_t.FromBR( br ); // (daliasinterval_t*)(pingroup + 1);
 
             frame.interval = EndianHelper.LittleFloat( pin_intervals.interval );
 
@@ -349,9 +387,13 @@ namespace SharpQuake.Game.Data.Models
             {
                 var tris = new trivertx_t[Header.numverts];
                 var offset1 = offset + daliasframe_t.SizeInBytes;
+
+                br.BaseStream.Seek( offset1, SeekOrigin.Begin );
+
                 for ( var j = 0; j < Header.numverts; j++, offset1 += trivertx_t.SizeInBytes )
                 {
-                    tris[j] = Utilities.BytesToStructure<trivertx_t>( pin.Data, offset1 );
+                    //tris[j] = Utilities.BytesToStructure<trivertx_t>( pin.Data, offset1 );
+                    tris[j] = trivertx_t.FromBR( br );
                 }
                 _PoseVerts[PoseNum] = tris;
                 PoseNum++;

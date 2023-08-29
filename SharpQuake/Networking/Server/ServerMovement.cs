@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -26,24 +26,37 @@ using SharpQuake.Framework;
 using SharpQuake.Framework.IO.BSP;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Framework.World;
+using SharpQuake.Networking.Server;
+using SharpQuake.Sys.Programs;
 using System;
 
 // sv_move.c
 
 namespace SharpQuake
 {
-	partial class server
+    public class ServerMovement
 	{
-		private const Single DI_NODIR = -1;
+		public const Single DI_NODIR = -1;
 
-		/// <summary>
-		/// SV_movestep
-		/// Called by monster program code.
-		/// The move will be adjusted for slopes and stairs, but if the move isn't
-		/// possible, no move is done, false is returned, and
-		/// pr_global_struct.trace_normal is set to the normal of the blocking wall
-		/// </summary>
-		public Boolean MoveStep( MemoryEdict ent, ref Vector3f move, Boolean relink )
+        private readonly ServerState _state;
+        private readonly ServerPhysics _physics;
+        private readonly ServerWorld _world;
+
+        public ServerMovement( ServerState state, ServerPhysics physics, ServerWorld world )
+        {
+            _state = state;
+			_physics = physics;
+			_world = world;
+        }
+
+        /// <summary>
+        /// SV_movestep
+        /// Called by monster program code.
+        /// The move will be adjusted for slopes and stairs, but if the move isn't
+        /// possible, no move is done, false is returned, and
+        /// pr_global_struct.trace_normal is set to the normal of the blocking wall
+        /// </summary>
+        public Boolean MoveStep( MemoryEdict ent, ref Vector3f move, Boolean relink )
 		{
 			Trace_t trace;
 
@@ -59,8 +72,10 @@ namespace SharpQuake
 				for ( var i = 0; i < 2; i++ )
 				{
 					MathLib.VectorAdd( ref ent.v.origin, ref move, out neworg );
-					var enemy = ProgToEdict( ent.v.enemy );
-					if ( i == 0 && enemy != sv.edicts[0] )
+
+					var enemy = _state.ProgToEdict( ent.v.enemy );
+					
+					if ( i == 0 && enemy != _state.Data.edicts[0] )
 					{
 						var dz = ent.v.origin.z - enemy.v.origin.z;
 						if ( dz > 40 )
@@ -69,20 +84,23 @@ namespace SharpQuake
 							neworg.z += 8;
 					}
 
-					trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref neworg, 0, ent );
+					trace = _physics.Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref neworg, 0, ent );
+					
 					if ( trace.fraction == 1 )
 					{
 						if ( ( ( Int32 ) ent.v.flags & EdictFlags.FL_SWIM ) != 0 &&
-							PointContents( ref trace.endpos ) == ( Int32 ) Q1Contents.Empty )
+                            _world.PointContents( ref trace.endpos ) == ( Int32 ) Q1Contents.Empty )
 							return false;   // swim monster left water
 
 						MathLib.Copy( ref trace.endpos, out ent.v.origin );
+
 						if ( relink )
-							LinkEdict( ent, true );
+                            _world.LinkEdict( ent, true );
+
 						return true;
 					}
 
-					if ( enemy == sv.edicts[0] )
+					if ( enemy == _state.Data.edicts[0] )
 						break;
 				}
 
@@ -90,19 +108,19 @@ namespace SharpQuake
 			}
 
 			// push down from a step height above the wished position
-			neworg.z += STEPSIZE;
+			neworg.z += ServerPhysics.STEPSIZE;
 			var end = neworg;
-			end.z -= STEPSIZE * 2;
+			end.z -= ServerPhysics.STEPSIZE * 2;
 
-			trace = Move( ref neworg, ref ent.v.mins, ref ent.v.maxs, ref end, 0, ent );
+			trace = _physics.Move( ref neworg, ref ent.v.mins, ref ent.v.maxs, ref end, 0, ent );
 
 			if ( trace.allsolid )
 				return false;
 
 			if ( trace.startsolid )
 			{
-				neworg.z -= STEPSIZE;
-				trace = Move( ref neworg, ref ent.v.mins, ref ent.v.maxs, ref end, 0, ent );
+				neworg.z -= ServerPhysics.STEPSIZE;
+				trace = _physics.Move( ref neworg, ref ent.v.mins, ref ent.v.maxs, ref end, 0, ent );
 				if ( trace.allsolid || trace.startsolid )
 					return false;
 			}
@@ -113,7 +131,7 @@ namespace SharpQuake
 				{
 					MathLib.VectorAdd( ref ent.v.origin, ref move, out ent.v.origin );
 					if ( relink )
-						LinkEdict( ent, true );
+                        _world.LinkEdict( ent, true );
 					ent.v.flags = ( Int32 ) ent.v.flags & ~EdictFlags.FL_ONGROUND;
 					return true;
 				}
@@ -131,7 +149,7 @@ namespace SharpQuake
 					// entity had floor mostly pulled out from underneath it
 					// and is trying to correct
 					if ( relink )
-						LinkEdict( ent, true );
+						_world.LinkEdict( ent, true );
 					return true;
 				}
 				ent.v.origin = oldorg;
@@ -142,11 +160,11 @@ namespace SharpQuake
 			{
 				ent.v.flags = ( Int32 ) ent.v.flags & ~EdictFlags.FL_PARTIALGROUND;
 			}
-			ent.v.groundentity = EdictToProg( trace.ent );
+			ent.v.groundentity = _state.EdictToProg( trace.ent );
 
 			// the move is ok
 			if ( relink )
-				LinkEdict( ent, true );
+				_world.LinkEdict( ent, true );
 			return true;
 		}
 
@@ -169,7 +187,7 @@ namespace SharpQuake
 				{
 					start.X = ( x != 0 ? maxs.x : mins.x );
 					start.Y = ( y != 0 ? maxs.y : mins.y );
-					if ( PointContents( ref start ) != ( Int32 ) Q1Contents.Solid )
+					if ( _world.PointContents( ref start ) != ( Int32 ) Q1Contents.Solid )
 						goto RealCheck;
 				}
 
@@ -186,8 +204,8 @@ namespace SharpQuake
 			start.X = ( mins.x + maxs.x ) * 0.5f;
 			start.Y = ( mins.y + maxs.y ) * 0.5f;
 			var stop = start;
-			stop.Z -= 2 * STEPSIZE;
-			var trace = Move( ref start, ref Utilities.ZeroVector, ref Utilities.ZeroVector, ref stop, 1, ent );
+			stop.Z -= 2 * ServerPhysics.STEPSIZE;
+			var trace = _world.Move( ref start, ref Utilities.ZeroVector, ref Utilities.ZeroVector, ref stop, 1, ent );
 
 			if ( trace.fraction == 1.0 )
 				return false;
@@ -202,61 +220,14 @@ namespace SharpQuake
 					start.X = stop.X = ( x != 0 ? maxs.x : mins.x );
 					start.Y = stop.Y = ( y != 0 ? maxs.y : mins.y );
 
-					trace = Move( ref start, ref Utilities.ZeroVector, ref Utilities.ZeroVector, ref stop, 1, ent );
+					trace = _world.Move( ref start, ref Utilities.ZeroVector, ref Utilities.ZeroVector, ref stop, 1, ent );
 
 					if ( trace.fraction != 1.0 && trace.endpos.Z > bottom )
 						bottom = trace.endpos.Z;
-					if ( trace.fraction == 1.0 || mid - trace.endpos.Z > STEPSIZE )
+
+					if ( trace.fraction == 1.0 || mid - trace.endpos.Z > ServerPhysics.STEPSIZE )
 						return false;
 				}
-
-			return true;
-		}
-
-		/// <summary>
-		/// SV_MoveToGoal
-		/// </summary>
-		public void MoveToGoal( )
-		{
-			var ent = ProgToEdict( Host.Programs.GlobalStruct.self );
-			var goal = ProgToEdict( ent.v.goalentity );
-			var dist = Host.ProgramsBuiltIn.GetFloat( ProgramOperatorDef.OFS_PARM0 );
-
-			if ( ( ( Int32 ) ent.v.flags & ( EdictFlags.FL_ONGROUND | EdictFlags.FL_FLY | EdictFlags.FL_SWIM ) ) == 0 )
-			{
-				Host.ProgramsBuiltIn.ReturnFloat( 0 );
-				return;
-			}
-
-			// if the next step hits the enemy, return immediately
-			if ( ProgToEdict( ent.v.enemy ) != sv.edicts[0] && CloseEnough( ent, goal, dist ) )
-				return;
-
-			// bump around...
-			if ( ( MathLib.Random() & 3 ) == 1 || !StepDirection( ent, ent.v.ideal_yaw, dist ) )
-			{
-				NewChaseDir( ent, goal, dist );
-			}
-		}
-
-		/// <summary>
-		/// SV_CloseEnough
-		/// </summary>
-		private Boolean CloseEnough( MemoryEdict ent, MemoryEdict goal, Single dist )
-		{
-			if ( goal.v.absmin.x > ent.v.absmax.x + dist )
-				return false;
-			if ( goal.v.absmin.y > ent.v.absmax.y + dist )
-				return false;
-			if ( goal.v.absmin.z > ent.v.absmax.z + dist )
-				return false;
-
-			if ( goal.v.absmax.x < ent.v.absmin.x - dist )
-				return false;
-			if ( goal.v.absmax.y < ent.v.absmin.y - dist )
-				return false;
-			if ( goal.v.absmax.z < ent.v.absmin.z - dist )
-				return false;
 
 			return true;
 		}
@@ -265,10 +236,11 @@ namespace SharpQuake
 		/// SV_StepDirection
 		/// Turns to the movement direction, and walks the current distance if facing it.
 		/// </summary>
-		private Boolean StepDirection( MemoryEdict ent, Single yaw, Single dist )
+		public Boolean StepDirection( MemoryEdict ent, Single yaw, Single dist )
 		{
 			ent.v.ideal_yaw = yaw;
-			Host.ProgramsBuiltIn.PF_changeyaw();
+
+			_state.OnProgramsChangeYaw?.Invoke( );
 
 			yaw = ( Single ) ( yaw * Math.PI * 2.0 / 360 );
 			Vector3f move;
@@ -285,15 +257,15 @@ namespace SharpQuake
 					// not turned far enough, so don't take the step
 					ent.v.origin = oldorigin;
 				}
-				LinkEdict( ent, true );
+				_world.LinkEdict( ent, true );
 				return true;
 			}
-			LinkEdict( ent, true );
+			_world.LinkEdict( ent, true );
 
 			return false;
 		}
 
-		private Vector3f SetupChaseDirection( Single deltax, Single deltay )
+		public Vector3f SetupChaseDirection( Single deltax, Single deltay )
 		{
 			Vector3f d = new Vector3f();
 
@@ -314,7 +286,7 @@ namespace SharpQuake
 			return d;
 		}
 
-		private Boolean TryDirectChaseRoute( Vector3f d, Single turnaround, MemoryEdict actor, Single dist )
+		public Boolean TryDirectChaseRoute( Vector3f d, Single turnaround, MemoryEdict actor, Single dist )
 		{
 			Single tdir;
 
@@ -332,7 +304,7 @@ namespace SharpQuake
 			return true;
 		}
 
-		private Boolean TryAlternateChaseRoute( Vector3f d, Single turnaround, MemoryEdict actor, Single dist, Single deltax, Single deltay )
+		public Boolean TryAlternateChaseRoute( Vector3f d, Single turnaround, MemoryEdict actor, Single dist, Single deltax, Single deltay )
 		{
 			if ( ( ( MathLib.Random() & 3 ) & 1 ) != 0 || Math.Abs( deltay ) > Math.Abs( deltax ) )
 			{
@@ -350,7 +322,7 @@ namespace SharpQuake
 			return true;
 		}
 
-		private Boolean TryRandomChaseDir( Single turnaround, MemoryEdict actor, Single dist )
+		public Boolean TryRandomChaseDir( Single turnaround, MemoryEdict actor, Single dist )
 		{
 			if ( ( MathLib.Random() & 1 ) != 0 )    //randomly determine direction of search
 			{
@@ -369,49 +341,12 @@ namespace SharpQuake
 				return false;
 
 			return true;
-		}
-
-		/// <summary>
-		/// SV_NewChaseDir
-		/// </summary>
-		private void NewChaseDir( MemoryEdict actor, MemoryEdict enemy, Single dist )
-		{
-			var olddir = MathLib.AngleMod( ( Int32 ) ( actor.v.ideal_yaw / 45 ) * 45 );
-			var turnaround = MathLib.AngleMod( olddir - 180 );
-
-			var deltax = enemy.v.origin.x - actor.v.origin.x;
-			var deltay = enemy.v.origin.y - actor.v.origin.y;
-			var d = SetupChaseDirection( deltax, deltay );
-
-			// try direct route
-			if ( !TryDirectChaseRoute( d, turnaround, actor, dist ) )
-				return;
-
-			// try other directions
-			if ( !TryAlternateChaseRoute( d, turnaround, actor, dist, deltax, deltay ) )
-				return;
-
-			// there is no direct path to the player, so pick another direction
-			if ( olddir != DI_NODIR && StepDirection( actor, olddir, dist ) )
-				return;
-
-			// Randomly determine direction of search
-			if ( !TryRandomChaseDir( turnaround, actor, dist ) )
-				return;
-
-			actor.v.ideal_yaw = olddir;     // can't move
-
-			// if a bridge was pulled out from underneath a monster, it may not have
-			// a valid standing position at all
-
-			if ( !CheckBottom( actor ) )
-				FixCheckBottom( actor );
-		}
+		}		
 
 		/// <summary>
 		/// SV_FixCheckBottom
 		/// </summary>
-		private void FixCheckBottom( MemoryEdict ent )
+		public void FixCheckBottom( MemoryEdict ent )
 		{
 			ent.v.flags = ( Int32 ) ent.v.flags | EdictFlags.FL_PARTIALGROUND;
 		}

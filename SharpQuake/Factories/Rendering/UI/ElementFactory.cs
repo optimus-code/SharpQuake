@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -21,19 +21,17 @@
 /// along with this program; if not, write to the Free Software
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
-/// 
 
+using System;
 using SharpQuake.Framework.Factories;
-using SharpQuake.Framework.IO;
-using SharpQuake.Framework.IO.Input;
-using SharpQuake.Renderer.Textures;
-using SharpQuake.Rendering.UI;
+using SharpQuake.Framework.Rendering.UI;
 using SharpQuake.Rendering.UI.Elements;
 using SharpQuake.Rendering.UI.Elements.Text;
 using SharpQuake.Rendering.UI.Elements.HUD;
-using System;
-using SharpQuake.Framework.Rendering.UI;
 using SharpQuake.Rendering.UI.Elements.Warnings;
+using SharpQuake.Sys;
+using System.Windows.Forms;
+using SharpQuake.Logging;
 
 namespace SharpQuake.Factories.Rendering.UI
 {
@@ -66,59 +64,70 @@ namespace SharpQuake.Factories.Rendering.UI
 		public const String NET = "NetLagWarning";
 		public const String PAUSE = "Pause";
 
-		public Host Host
-		{
-			get;
-			private set;
-		}
-
-		public ElementFactory( Host host )
-        {
-			Host = host;
-
-			Configure( );
-		}
-
 		/// <summary>
-		/// Configure common UI elements
+		/// Statically defined list of UI elements
 		/// </summary>
-		private void Configure()
-		{
+		/// <remarks>
+		/// (Is added to DI hence the static list.)
+		/// </remarks>
+		public static Type[] FACTORY_TYPES = new Type[]
+        {
 			// HUD elements
-			Add( new Hud( Host ) );
-			Add( new SPScoreboard( Host ) );
-			Add( new MPScoreboard( Host ) );
-			Add( new MPMiniScoreboard( Host ) );
-			Add( new Frags( Host ) );
-			Add( new IntermissionOverlay( Host ) );
-			Add( new FinaleOverlay( Host ) );
-			Add( new VisualConsole( Host ) );
-
+			typeof( Hud ),
+            typeof( SPScoreboard ),
+            typeof( MPScoreboard ),
+            typeof( MPMiniScoreboard ),
+            typeof( Frags ),
+            typeof( IntermissionOverlay ),
+            typeof( FinaleOverlay ),
+            typeof( VisualConsole ),
+			
 			// Dynamic text elements
-			Add( new CentrePrint( Host ) );
-			Add( new ModalMessage( Host ) );
-			Add( new FPSCounter( Host ) );
 
+            typeof( CentrePrint ),
+            typeof( SPScoreboard ),
+            typeof( ModalMessage ),
+            typeof( FPSCounter ),
+			
 			// Static elements
-			Add( new Loading( Host ) );
-			Add( new Crosshair( Host ) );
-			Add( new LoadingDisc( Host ) );
-			Add( new RAMWarning( Host ) );
-			Add( new LagWarning( Host ) );
-			Add( new NetLagWarning( Host ) );
-			Add( new Pause( Host ) );
+            typeof( Loading ),
+            typeof( Crosshair ),
+            typeof( LoadingDisc ),
+            typeof( RAMWarning ),
+            typeof( LagWarning ),
+            typeof( NetLagWarning ),
+            typeof( Pause ),
+        };
+
+		private readonly IEngine _engine;
+
+		public ElementFactory( IEngine engine )
+		{
+			_engine = engine;
 		}
 
 		/// <summary>
 		/// Initialise all UI elements
 		/// </summary>
+		/// <remarks>
+		/// (This also makes sure the DI instantiates the factory items,
+		/// without this; they would not get instantiated unless directly
+		/// referenced.)
+		/// </remarks>
 		public void Initialise()
         {
-			foreach ( var element in DictionaryItems.Values )
-            {
-				if ( !element.ManualInitialisation )
-					element.Initialise();
-            }
+			foreach ( var elementType in FACTORY_TYPES )
+			{
+				var t = typeof ( IGameConsoleLogger ).IsAssignableFrom( elementType ) ? typeof ( IGameConsoleLogger ) : elementType;
+
+				var instance = ( IElementRenderer ) _engine.Get( t );
+
+				// Add them to the factory to save having to grab instances from DI
+                Add( elementType.Name, instance );
+
+                if ( !instance.ManualInitialisation )
+					instance.Initialise( );
+			}
         }
 
 		/// <summary>
@@ -131,18 +140,6 @@ namespace SharpQuake.Factories.Rendering.UI
 				return;
 
 			DictionaryItems[name].Initialise( );
-		}
-
-		/// <summary>
-		/// Add a UI element
-		/// </summary>
-		/// <remarks>
-		/// (Must be called before Initialise)
-		/// </remarks>
-		/// <param name="textRenderer"></param>
-		public void Add( IElementRenderer textRenderer )
-		{
-			Add( textRenderer.GetType( ).Name, textRenderer );
 		}
 
 		/// <summary>

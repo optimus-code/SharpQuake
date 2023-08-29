@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -28,15 +28,25 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using SharpQuake.Desktop;
+using SharpQuake.Factories;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.IO;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Game.Client;
+using SharpQuake.Logging;
+using SharpQuake.Networking.Client;
+using SharpQuake.Networking.Server;
+using SharpQuake.Rendering;
+using SharpQuake.Services;
+using SharpQuake.Sys;
 
 namespace SharpQuake
 {
 	internal delegate void PollHandler( Object arg );
 
-	public class Network
+	public class Network : IDisposable
 	{
 		public INetDriver[] Drivers
 		{
@@ -106,7 +116,7 @@ namespace SharpQuake
 		{
 			get
 			{
-				return Host.Cvars.HostName.Get<String>();
+				return Cvars.HostName.Get<String>();
 			}
 		}
 
@@ -134,7 +144,7 @@ namespace SharpQuake
 		{
 			get
 			{
-				return net_tcp_ip.Instance.IsInitialised;
+				return _engine.Get<net_tcp_ip>( ).IsInitialised;
 			}
 		}
 
@@ -269,9 +279,24 @@ namespace SharpQuake
 		// vcrGetMessage
 		private VcrRecord2 _VcrSendMessage = new VcrRecord2();
 
-		public Network( Host host )
+		private readonly IEngine _engine;
+		private readonly IConsoleLogger _logger;
+		private readonly ClientVariableFactory _cvars;
+		private readonly CommandFactory _commands;
+		private readonly ClientState _clientState;
+		private readonly ServerState _serverState;
+		private readonly VCRService _vcr;
+
+		public Network( IEngine engine, IConsoleLogger logger, VCRService vcr, ClientState clientState,
+			ServerState serverState, ClientVariableFactory cvars, CommandFactory commands )
 		{
-			Host = host;
+			_engine = engine;
+			_logger = logger;
+			_vcr = vcr;
+			_clientState = clientState;
+			_serverState = serverState;
+			_cvars = cvars;
+			_commands = commands;
 
 			_SlistSendProcedure = new PollProcedure( null, 0.0, SlistSend, null );
 			_SlistPollProcedure = new PollProcedure( null, 0.0, SlistPoll, null );
@@ -281,13 +306,6 @@ namespace SharpQuake
 			{
 				return LanDrivers[index];
 			};
-		}
-
-		// CHANGE
-		private Host Host
-		{
-			get;
-			set;
 		}
 
 		// vcrSendMessage
@@ -303,15 +321,15 @@ namespace SharpQuake
 				{
 					_Drivers = new INetDriver[]
 					{
-						new net_vcr()
+						_engine.Get<net_vcr>( )
 					};
 				}
 				else
 				{
 					_Drivers = new INetDriver[]
 					{
-						new net_loop(),
-						net_datagram.Instance
+                        _engine.Get<net_loop>( ),
+                        _engine.Get<net_datagram>( )
 					};
 				}
 			}
@@ -320,7 +338,7 @@ namespace SharpQuake
 			{
 				_LanDrivers = new INetLanDriver[]
 				{
-					net_tcp_ip.Instance
+                    _engine.Get<net_tcp_ip>( )
 				};
 			}
 
@@ -342,10 +360,10 @@ namespace SharpQuake
 			}
 			HostPort = _DefHostPort;
 
-			if ( CommandLine.HasParam( "-listen" ) || Host.Client.cls.state == cactive_t.ca_dedicated )
+			if ( CommandLine.HasParam( "-listen" ) || _clientState.StaticData.state == cactive_t.ca_dedicated )
 				_IsListening = true;
-			var numsockets = Host.Server.svs.maxclientslimit;
-			if ( Host.Client.cls.state != cactive_t.ca_dedicated )
+			var numsockets = _serverState.StaticData.maxclientslimit;
+			if ( _clientState.StaticData.state != cactive_t.ca_dedicated )
 				numsockets++;
 
 			_FreeSockets = new List<qsocket_t>( numsockets );
@@ -360,22 +378,22 @@ namespace SharpQuake
 			Message = new MessageWriter( NetworkDef.NET_MAXMESSAGE ); // SZ_Alloc (&net_message, NET_MAXMESSAGE);
 			Reader = new MessageReader( Message );
 
-			if ( Host.Cvars.MessageTimeout == null )
+			if ( Cvars.MessageTimeout == null )
 			{
-				Host.Cvars.MessageTimeout = Host.CVars.Add( "net_messagetimeout", 300 );
-				Host.Cvars.HostName = Host.CVars.Add( "hostname", "UNNAMED" );
+				Cvars.MessageTimeout = _cvars.Add( "net_messagetimeout", 300 );
+				Cvars.HostName = _cvars.Add( "hostname", "UNNAMED" );
 			}
 
-			Host.Commands.Add( "slist", Slist_f );
-			Host.Commands.Add( "listen", Listen_f );
-			Host.Commands.Add( "maxplayers", MaxPlayers_f );
-			Host.Commands.Add( "port", Port_f );
+			_commands.Add( "slist", Slist_f );
+			_commands.Add( "listen", Listen_f );
+			_commands.Add( "maxplayers", MaxPlayers_f );
+			_commands.Add( "port", Port_f );
 
 			// initialize all the drivers
 			_DriverLevel = 0;
 			foreach ( var driver in _Drivers )
 			{
-				driver.Initialise( Host );
+				driver.Initialise( );
 				if ( driver.IsInitialised && _IsListening )
 				{
 					driver.Listen( true );
@@ -386,7 +404,7 @@ namespace SharpQuake
 			//if (*my_ipx_address)
 			//    Con_DPrintf("IPX address %s\n", my_ipx_address);
 			if ( !String.IsNullOrEmpty( _MyTcpIpAddress ) )
-				Host.Console.DPrint( "TCP/IP address {0}\n", _MyTcpIpAddress );
+				_logger.DPrint( "TCP/IP address {0}\n", _MyTcpIpAddress );
 		}
 
 		// net_driverlevel
@@ -394,7 +412,7 @@ namespace SharpQuake
 		/// <summary>
 		/// NET_Shutdown
 		/// </summary>
-		public void Shutdown( )
+		public void Dispose( )
 		{
 			SetNetTime();
 
@@ -440,17 +458,17 @@ namespace SharpQuake
 				{
 					if ( _IsRecording )
 					{
-						_VcrConnect.time = Host.Time;
+						_VcrConnect.time = Sys.Time._Time;
 						_VcrConnect.op = VcrOp.VCR_OP_CONNECT;
 						_VcrConnect.session = 1; // (long)ret; // Uze: todo: make it work on 64bit systems
 						var buf = Utilities.StructureToBytes( ref _VcrConnect );
-						Host.VcrWriter.Write( buf, 0, buf.Length );
+						_vcr.Write( buf, 0, buf.Length );
 						buf = Encoding.ASCII.GetBytes( ret.address );
 						var count = Math.Min( buf.Length, NetworkDef.NET_NAMELEN );
 						var extra = NetworkDef.NET_NAMELEN - count;
-						Host.VcrWriter.Write( buf, 0, count );
+						_vcr.Write( buf, 0, count );
 						for ( var i = 0; i < extra; i++ )
-							Host.VcrWriter.Write( ( Byte ) 0 );
+							_vcr.Write( ( Byte ) 0 );
 					}
 					return ret;
 				}
@@ -458,11 +476,11 @@ namespace SharpQuake
 
 			if ( _IsRecording )
 			{
-				_VcrConnect.time = Host.Time;
+				_VcrConnect.time = Sys.Time._Time;
 				_VcrConnect.op = VcrOp.VCR_OP_CONNECT;
 				_VcrConnect.session = 0;
 				var buf = Utilities.StructureToBytes( ref _VcrConnect );
-				Host.VcrWriter.Write( buf, 0, buf.Length );
+				_vcr.Write( buf, 0, buf.Length );
 			}
 
 			return null;
@@ -515,7 +533,7 @@ namespace SharpQuake
 				if ( HostCacheCount != 1 )
 					return null;
 				host = _HostCache[0].cname;
-				Host.Console.Print( "Connecting to...\n{0} @ {1}\n\n", _HostCache[0].name, host );
+				_logger.Print( "Connecting to...\n{0} @ {1}\n\n", _HostCache[0].name, host );
 			}
 
 			_DriverLevel = 0;
@@ -543,7 +561,7 @@ namespace SharpQuake
 
 			if ( host != null )
 			{
-				Host.Console.Print( "\n" );
+				_logger.Print( "\n" );
 				PrintSlistHeader();
 				PrintSlist();
 				PrintSlistTrailer();
@@ -571,12 +589,12 @@ namespace SharpQuake
 
 			if ( _IsRecording )
 			{
-				_VcrSendMessage.time = Host.Time;
+				_VcrSendMessage.time = Sys.Time.Absolute;
 				_VcrSendMessage.op = VcrOp.VCR_OP_CANSENDMESSAGE;
 				_VcrSendMessage.session = 1; // (long)sock; Uze: todo: do something?
 				_VcrSendMessage.ret = r ? 1 : 0;
 				var buf = Utilities.StructureToBytes( ref _VcrSendMessage );
-				Host.VcrWriter.Write( buf, 0, buf.Length );
+				_vcr.Write( buf, 0, buf.Length );
 			}
 
 			return r;
@@ -599,7 +617,7 @@ namespace SharpQuake
 
 			if ( sock.disconnected )
 			{
-				Host.Console.Print( "NET_GetMessage: disconnected socket\n" );
+				_logger.Print( "NET_GetMessage: disconnected socket\n" );
 				return -1;
 			}
 
@@ -610,7 +628,7 @@ namespace SharpQuake
 			// see if this connection has timed out
 			if ( ret == 0 && sock.driver != 0 )
 			{
-				if ( _Time - sock.lastMessageTime > Host.Cvars.MessageTimeout.Get<Int32>() )
+				if ( _Time - sock.lastMessageTime > Cvars.MessageTimeout.Get<Int32>() )
 				{
 					Close( sock );
 					return -1;
@@ -630,26 +648,26 @@ namespace SharpQuake
 
 				if ( _IsRecording )
 				{
-					_VcrGetMessage.time = Host.Time;
+					_VcrGetMessage.time = Sys.Time.Absolute;
 					_VcrGetMessage.op = VcrOp.VCR_OP_GETMESSAGE;
 					_VcrGetMessage.session = 1;// (long)sock; Uze todo: write somethisng meaningful
 					_VcrGetMessage.ret = ret;
 					var buf = Utilities.StructureToBytes( ref _VcrGetMessage );
-					Host.VcrWriter.Write( buf, 0, buf.Length );
-					Host.VcrWriter.Write( Message.Length );
-					Host.VcrWriter.Write( Message.Data, 0, Message.Length );
+					_vcr.Write( buf, 0, buf.Length );
+                    _vcr.Write( Message.Length );
+                    _vcr.Write( Message.Data, 0, Message.Length );
 				}
 			}
 			else
 			{
 				if ( _IsRecording )
 				{
-					_VcrGetMessage.time = Host.Time;
+					_VcrGetMessage.time = Sys.Time.Absolute;
 					_VcrGetMessage.op = VcrOp.VCR_OP_GETMESSAGE;
 					_VcrGetMessage.session = 1; // (long)sock; Uze todo: fix this
 					_VcrGetMessage.ret = ret;
 					var buf = Utilities.StructureToBytes( ref _VcrGetMessage );
-					Host.VcrWriter.Write( buf, 0, buf.Length );
+                    _vcr.Write( buf, 0, buf.Length );
 				}
 			}
 
@@ -671,7 +689,7 @@ namespace SharpQuake
 
 			if ( sock.disconnected )
 			{
-				Host.Console.Print( "NET_SendMessage: disconnected socket\n" );
+				_logger.Print( "NET_SendMessage: disconnected socket\n" );
 				return -1;
 			}
 
@@ -683,12 +701,12 @@ namespace SharpQuake
 
 			if ( _IsRecording )
 			{
-				_VcrSendMessage.time = Host.Time;
+				_VcrSendMessage.time = Sys.Time.Absolute;
 				_VcrSendMessage.op = VcrOp.VCR_OP_SENDMESSAGE;
 				_VcrSendMessage.session = 1; // (long)sock; Uze: todo: do something?
 				_VcrSendMessage.ret = r;
 				var buf = Utilities.StructureToBytes( ref _VcrSendMessage );
-				Host.VcrWriter.Write( buf, 0, buf.Length );
+				_vcr.Write( buf, 0, buf.Length );
 			}
 
 			return r;
@@ -708,7 +726,7 @@ namespace SharpQuake
 
 			if ( sock.disconnected )
 			{
-				Host.Console.Print( "NET_SendMessage: disconnected socket\n" );
+				_logger.Print( "NET_SendMessage: disconnected socket\n" );
 				return -1;
 			}
 
@@ -720,12 +738,12 @@ namespace SharpQuake
 
 			if ( _IsRecording )
 			{
-				_VcrSendMessage.time = Host.Time;
+				_VcrSendMessage.time = Sys.Time.Absolute;
 				_VcrSendMessage.op = VcrOp.VCR_OP_SENDMESSAGE;
 				_VcrSendMessage.session = 1;// (long)sock; Uze todo: ???????
 				_VcrSendMessage.ret = r;
 				var buf = Utilities.StructureToBytes( ref _VcrSendMessage );
-				Host.VcrWriter.Write( buf );
+				_vcr.Write( buf );
 			}
 
 			return r;
@@ -741,17 +759,17 @@ namespace SharpQuake
 			var state2 = new Boolean[QDef.MAX_SCOREBOARD];
 
 			var count = 0;
-			for ( var i = 0; i < Host.Server.svs.maxclients; i++ )
+			for ( var i = 0; i < _serverState.StaticData.maxclients; i++ )
 			{
-				Host.HostClient = Host.Server.svs.clients[i];
-				if ( Host.HostClient.netconnection == null )
+				var client = _serverState.StaticData.clients[i];
+				if ( client.netconnection == null )
 					continue;
 
-				if ( Host.HostClient.active )
+				if ( client.active )
 				{
-					if ( Host.HostClient.netconnection.driver == 0 )
+					if ( client.netconnection.driver == 0 )
 					{
-						SendMessage( Host.HostClient.netconnection, data );
+						SendMessage( client.netconnection, data );
 						state1[i] = true;
 						state2[i] = true;
 						continue;
@@ -771,19 +789,19 @@ namespace SharpQuake
 			while ( count > 0 )
 			{
 				count = 0;
-				for ( var i = 0; i < Host.Server.svs.maxclients; i++ )
+				for ( var i = 0; i < _serverState.StaticData.maxclients; i++ )
 				{
-					Host.HostClient = Host.Server.svs.clients[i];
+					var client = _serverState.StaticData.clients[i];
 					if ( !state1[i] )
 					{
-						if ( CanSendMessage( Host.HostClient.netconnection ) )
+						if ( CanSendMessage( client.netconnection ) )
 						{
 							state1[i] = true;
-							SendMessage( Host.HostClient.netconnection, data );
+							SendMessage( client.netconnection, data );
 						}
 						else
 						{
-							GetMessage( Host.HostClient.netconnection );
+							GetMessage( client.netconnection );
 						}
 						count++;
 						continue;
@@ -791,13 +809,13 @@ namespace SharpQuake
 
 					if ( !state2[i] )
 					{
-						if ( CanSendMessage( Host.HostClient.netconnection ) )
+						if ( CanSendMessage( client.netconnection ) )
 						{
 							state2[i] = true;
 						}
 						else
 						{
-							GetMessage( Host.HostClient.netconnection );
+							GetMessage( client.netconnection );
 						}
 						count++;
 						continue;
@@ -876,7 +894,7 @@ namespace SharpQuake
 
 			if ( !SlistSilent )
 			{
-				Host.Console.Print( "Looking for Quake servers...\n" );
+				_logger.Print( "Looking for Quake servers...\n" );
 				PrintSlistHeader();
 			}
 
@@ -899,7 +917,7 @@ namespace SharpQuake
 			if ( _FreeSockets.Count == 0 )
 				return null;
 
-			if ( ActiveConnections >= Host.Server.svs.maxclients )
+			if ( ActiveConnections >= _serverState.StaticData.maxclients )
 				return null;
 
 			// get one from free list
@@ -933,8 +951,8 @@ namespace SharpQuake
 		// pollProcedureList
 		private void PrintSlistHeader( )
 		{
-			Host.Console.Print( "Server          Map             Users\n" );
-			Host.Console.Print( "--------------- --------------- -----\n" );
+			_logger.Print( "Server          Map             Users\n" );
+			_logger.Print( "--------------- --------------- -----\n" );
 			_SlistLastShown = 0;
 		}
 
@@ -946,9 +964,9 @@ namespace SharpQuake
 			{
 				var hc = _HostCache[i];
 				if ( hc.maxusers != 0 )
-					Host.Console.Print( "{0,-15} {1,-15}\n {2,2}/{3,2}\n", Utilities.Copy( hc.name, 15 ), Utilities.Copy( hc.map, 15 ), hc.users, hc.maxusers );
+					_logger.Print( "{0,-15} {1,-15}\n {2,2}/{3,2}\n", Utilities.Copy( hc.name, 15 ), Utilities.Copy( hc.map, 15 ), hc.users, hc.maxusers );
 				else
-					Host.Console.Print( "{0,-15} {1,-15}\n", Utilities.Copy( hc.name, 15 ), Utilities.Copy( hc.map, 15 ) );
+					_logger.Print( "{0,-15} {1,-15}\n", Utilities.Copy( hc.name, 15 ), Utilities.Copy( hc.map, 15 ) );
 			}
 			_SlistLastShown = i;
 		}
@@ -956,9 +974,9 @@ namespace SharpQuake
 		private void PrintSlistTrailer( )
 		{
 			if ( HostCacheCount != 0 )
-				Host.Console.Print( "== end list ==\n\n" );
+				_logger.Print( "== end list ==\n\n" );
 			else
-				Host.Console.Print( "No Quake servers found.\n\n" );
+				_logger.Print( "No Quake servers found.\n\n" );
 		}
 
 		/// <summary>
@@ -991,7 +1009,7 @@ namespace SharpQuake
 		{
 			if ( msg.Parameters == null || msg.Parameters.Length != 1 )
 			{
-				Host.Console.Print( "\"listen\" is \"{0}\"\n", _IsListening ? 1 : 0 );
+				_logger.Print( "\"listen\" is \"{0}\"\n", _IsListening ? 1 : 0 );
 				return;
 			}
 
@@ -1011,36 +1029,36 @@ namespace SharpQuake
 		{
 			if ( msg.Parameters == null || msg.Parameters.Length != 1 )
 			{
-				Host.Console.Print( $"\"maxplayers\" is \"{Host.Server.svs.maxclients}\"\n" );
+				_logger.Print( $"\"maxplayers\" is \"{_serverState.StaticData.maxclients}\"\n" );
 				return;
 			}
 
-			if ( Host.Server.sv.active )
+			if ( _serverState.Data.active )
 			{
-				Host.Console.Print( "maxplayers can not be changed while a server is running.\n" );
+				_logger.Print( "maxplayers can not be changed while a server is running.\n" );
 				return;
 			}
 
 			var n = MathLib.atoi( msg.Parameters[0] );
 			if ( n < 1 )
 				n = 1;
-			if ( n > Host.Server.svs.maxclientslimit )
+			if ( n > _serverState.StaticData.maxclientslimit )
 			{
-				n = Host.Server.svs.maxclientslimit;
-				Host.Console.Print( "\"maxplayers\" set to \"{0}\"\n", n );
+				n = _serverState.StaticData.maxclientslimit;
+				_logger.Print( "\"maxplayers\" set to \"{0}\"\n", n );
 			}
 
 			if ( n == 1 && _IsListening )
-				Host.Commands.Buffer.Append( "listen 0\n" );
+				_commands.Buffer.Append( "listen 0\n" );
 
 			if ( n > 1 && !_IsListening )
-				Host.Commands.Buffer.Append( "listen 1\n" );
+				_commands.Buffer.Append( "listen 1\n" );
 
-			Host.Server.svs.maxclients = n;
+			_serverState.StaticData.maxclients = n;
 			if ( n == 1 )
-				Host.CVars.Set( "deathmatch", 0 );
+				_cvars.Set( "deathmatch", 0 );
 			else
-				Host.CVars.Set( "deathmatch", 1 );
+				_cvars.Set( "deathmatch", 1 );
 		}
 
 		// NET_Port_f
@@ -1048,14 +1066,14 @@ namespace SharpQuake
 		{
 			if ( msg.Parameters == null || msg.Parameters.Length != 1 )
 			{
-				Host.Console.Print( $"\"port\" is \"{HostPort}\"\n" );
+				_logger.Print( $"\"port\" is \"{HostPort}\"\n" );
 				return;
 			}
 
 			var n = MathLib.atoi( msg.Parameters[0] );
 			if ( n < 1 || n > 65534 )
 			{
-				Host.Console.Print( "Bad value, must be between 1 and 65534\n" );
+				_logger.Print( "Bad value, must be between 1 and 65534\n" );
 				return;
 			}
 
@@ -1065,8 +1083,8 @@ namespace SharpQuake
 			if ( _IsListening )
 			{
 				// force a change to the new port
-				Host.Commands.Buffer.Append( "listen 0\n" );
-				Host.Commands.Buffer.Append( "listen 1\n" );
+				_commands.Buffer.Append( "listen 0\n" );
+				_commands.Buffer.Append( "listen 1\n" );
 			}
 		}
 

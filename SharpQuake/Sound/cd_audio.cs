@@ -24,7 +24,7 @@
 
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -49,9 +49,14 @@
 using System;
 using System.IO;
 using NVorbis.OpenTKSupport;
+using SharpQuake.Factories;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.IO;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Game.Client;
+using SharpQuake.Logging;
+using SharpQuake.Sys;
 
 namespace SharpQuake
 {
@@ -59,7 +64,7 @@ namespace SharpQuake
     /// CDAudio_functions
     /// </summary>
 
-    public class cd_audio
+    public class cd_audio : IDisposable
     {
 #if _WINDOWS
         private ICDAudioController _Controller;
@@ -67,24 +72,24 @@ namespace SharpQuake
         NullCDAudioController _Controller;
 #endif
 
-        // CHANGE
-        private Host Host
+        private readonly IEngine _engine;
+        private readonly IConsoleLogger _logger;
+        private readonly CommandFactory _commands;
+
+        public cd_audio( IEngine engine, IConsoleLogger logger, CommandFactory commands )
         {
-            get;
-            set;
+            _engine = engine;
+            _logger = logger;
+            _commands = commands;
+            _Controller = new NullCDAudioController( );
         }
 
-        public cd_audio( Host host )
-        {
-            Host = host;
-            _Controller = new NullCDAudioController( Host );
-        }
         /// <summary>
         /// CDAudio_Init
         /// </summary>
         public Boolean Initialise( )
         {
-            if ( Host.Client.cls.state == cactive_t.ca_dedicated )
+            if ( _engine.IsDedicated )
                 return false;
 
             if ( CommandLine.HasParam( "-nocdaudio" ) )
@@ -94,8 +99,8 @@ namespace SharpQuake
 
             if ( _Controller.IsInitialised )
             {
-                Host.Commands.Add( "cd", CD_f );
-                Host.Console.Print( "CD Audio (Fallback) Initialized\n" );
+                _commands.Add( "cd", CD_f );
+                _logger.Print( "CD Audio (Fallback) Initialized\n" );
             }
 
             return _Controller.IsInitialised;
@@ -105,9 +110,7 @@ namespace SharpQuake
         public void Play( Byte track, Boolean looping )
         {
             _Controller.Play( track, looping );
-#if DEBUG
-            Console.WriteLine( "DEBUG: track byte:{0} - loop byte: {1}", track, looping );
-#endif
+            _logger.DPrint( "DEBUG: track byte: ^0{0}^9 - loop byte: ^0{1}\n", track, looping );
         }
 
         // CDAudio_Stop
@@ -129,7 +132,7 @@ namespace SharpQuake
         }
 
         // CDAudio_Shutdown
-        public void Shutdown( )
+        public void Dispose( )
         {
             _Controller.Shutdown( );
         }
@@ -179,7 +182,7 @@ namespace SharpQuake
                 {
                     for ( var n = 1; n < 100; n++ )
                         if ( remap[n] != n )
-                            Host.Console.Print( "  {0} -> {1}\n", n, remap[n] );
+                            _logger.Print( "  {0} -> {1}\n", n, remap[n] );
                     return;
                 }
                 for ( var n = 1; n <= ret; n++ )
@@ -198,7 +201,7 @@ namespace SharpQuake
                 _Controller.ReloadDiskInfo( );
                 if ( !_Controller.IsValidCD )
                 {
-                    Host.Console.Print( "No CD in player.\n" );
+                    _logger.Print( "No CD in player.\n" );
                     return;
                 }
             }
@@ -243,12 +246,12 @@ namespace SharpQuake
 
             if ( Utilities.SameText( command, "info" ) )
             {
-                Host.Console.Print( "%u tracks\n", _Controller.MaxTrack );
+                _logger.Print( "%u tracks\n", _Controller.MaxTrack );
                 if ( _Controller.IsPlaying )
-                    Host.Console.Print( "Currently {0} track {1}\n", _Controller.IsLooping ? "looping" : "playing", _Controller.CurrentTrack );
+                    _logger.Print( "Currently {0} track {1}\n", _Controller.IsLooping ? "looping" : "playing", _Controller.CurrentTrack );
                 else if ( _Controller.IsPaused )
-                    Host.Console.Print( "Paused {0} track {1}\n", _Controller.IsLooping ? "looping" : "playing", _Controller.CurrentTrack );
-                Host.Console.Print( "Volume is {0}\n", _Controller.Volume );
+                    _logger.Print( "Paused {0} track {1}\n", _Controller.IsLooping ? "looping" : "playing", _Controller.CurrentTrack );
+                _logger.Print( "Volume is {0}\n", _Controller.Volume );
                 return;
             }
         }
@@ -268,18 +271,6 @@ namespace SharpQuake
         private Single _Volume;
         private Boolean _isPlaying;
         private Boolean _isPaused;
-
-        private Host Host
-        {
-            get;
-            set;
-        }
-
-        public NullCDAudioController( Host host )
-        {
-            Host = host;
-            _Remap = new Byte[100];
-        }
 
         #region ICDAudioController Members
 
@@ -371,10 +362,23 @@ namespace SharpQuake
             }
         }
 
+        private Single BgmVolume
+        {
+            get
+            {
+                return Cvars.BgmVolume.Get<Single>( );
+            }
+        }
+
+        public NullCDAudioController( )
+        {
+            _Remap = new Byte[100];
+        }
+
         public void Initialise( )
         {
             streamer = new OggStreamer( 441000 );
-            _Volume = Host.Sound.BgmVolume;
+            _Volume = BgmVolume;
 
             if ( Directory.Exists( String.Format( "{0}/{1}/music/", QuakeParameter.globalbasedir, QuakeParameter.globalgameid ) ) == false )
             {
@@ -485,7 +489,7 @@ namespace SharpQuake
                 _isPlaying = true;
             }*/
 
-            _Volume = Host.Sound.BgmVolume;
+            _Volume = BgmVolume;
             oggStream.Volume = _Volume;
         }
 

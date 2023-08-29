@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,9 +22,14 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Rendering.UI.Menus;
+using SharpQuake.Sys;
 using System;
+using System.Windows.Shapes;
 
 namespace SharpQuake.Rendering.UI
 {
@@ -37,7 +42,7 @@ namespace SharpQuake.Rendering.UI
 		{
 			get
 			{
-				return MenuFactory.Get( "menu_multiplayer" ).Cursor == 0;
+				return _menus.Get( "menu_multiplayer" ).Cursor == 0;
 			}
 		}
 
@@ -45,7 +50,7 @@ namespace SharpQuake.Rendering.UI
 		{
 			get
 			{
-				return MenuFactory.Get( "menu_multiplayer" ).Cursor == 1;
+				return _menus.Get( "menu_multiplayer" ).Cursor == 1;
 			}
 		}
 
@@ -57,15 +62,25 @@ namespace SharpQuake.Rendering.UI
 		private String _PortName;
 		private String _JoinName;
 
-		public LanConfigMenu( MenuFactory menuFactory ) : base( "menu_lan_config", menuFactory )
+		private readonly Network _network;
+        private readonly snd _sound;
+        private readonly CommandFactory _commands;
+        private readonly PictureFactory _pictures;
+
+        public LanConfigMenu( IKeyboardInput keyboard, MenuFactory menus, 
+			Network network, snd sound, CommandFactory commands, PictureFactory pictures ) : base( "menu_lan_config", keyboard, menus )
 		{
 			Cursor = -1;
 			_JoinName = String.Empty;
-		}
+			_network = network;
+			_sound = sound;
+			_pictures = pictures;
+			_commands = commands;
+        }
 
-		public override void Show( Host host )
+		public override void Show( )
 		{
-			base.Show( host );
+			base.Show( );
 
 			if ( Cursor == -1 )
 			{
@@ -76,11 +91,11 @@ namespace SharpQuake.Rendering.UI
 			}
 			if ( StartingGame && Cursor == 2 )
 				Cursor = 1;
-			_Port = Host.Network.DefaultHostPort;
+			_Port = _network.DefaultHostPort;
 			_PortName = _Port.ToString();
 
-			Host.Menus.ReturnOnError = false;
-			Host.Menus.ReturnReason = String.Empty;
+			_menus.ReturnOnError = false;
+			_menus.ReturnReason = String.Empty;
 		}
 
 		public override void KeyEvent( Int32 key )
@@ -88,20 +103,20 @@ namespace SharpQuake.Rendering.UI
 			switch ( key )
 			{
 				case KeysDef.K_ESCAPE:
-					MenuFactory.Show( "menu_multiplayer" );
+                    _menus.Show( "menu_multiplayer" );
 					break;
 
 				case KeysDef.K_UPARROW:
-					Host.Sound.LocalSound( "misc/menu1.wav" );
+					_sound.LocalSound( "misc/menu1.wav" );
 					Cursor--;
 					if ( Cursor < 0 )
-						Cursor = NUM_LANCONFIG_CMDS - 1;
+						Cursor = NUM_LANCONFIG_CMDS;
 					break;
 
 				case KeysDef.K_DOWNARROW:
-					Host.Sound.LocalSound( "misc/menu1.wav" );
+					_sound.LocalSound( "misc/menu1.wav" );
 					Cursor++;
-					if ( Cursor >= NUM_LANCONFIG_CMDS )
+					if ( Cursor > NUM_LANCONFIG_CMDS )
 						Cursor = 0;
 					break;
 
@@ -109,40 +124,37 @@ namespace SharpQuake.Rendering.UI
 					if ( Cursor == 0 )
 						break;
 
-					Host.Menus.EnterSound = true;
-					Host.Network.HostPort = _Port;
+					_menus.EnterSound = true;
 
-					if ( Cursor == 1 )
+					M_ConfigureNetSubsystem( );
+
+                    if ( Cursor == 2 )
 					{
 						if ( StartingGame )
-						{
-							MenuFactory.Show( "menu_options" );
-						}
+                            _menus.Show( "menu_options" );
 						else
-						{
-							MenuFactory.Show( "menu_search" );
-						}
+                            _menus.Show( "menu_search" );
 						break;
 					}
 
-					if ( Cursor == 2 )
+					if ( Cursor == 3 )
 					{
-						Host.Menus.ReturnMenu = this;
-						Host.Menus.ReturnOnError = true;
-						MenuFactory.CurrentMenu.Hide();
-						Host.Commands.Buffer.Append( String.Format( "connect \"{0}\"\n", _JoinName ) );
+						_menus.ReturnMenu = this;
+						_menus.ReturnOnError = true;
+                        _menus.CurrentMenu.Hide();
+						_commands.Buffer.Append( String.Format( "connect \"{0}\"\n", _JoinName ) );
 						break;
 					}
 					break;
 
 				case KeysDef.K_BACKSPACE:
-					if ( Cursor == 0 )
+					if ( Cursor == 1 )
 					{
 						if ( !String.IsNullOrEmpty( _PortName ) )
 							_PortName = _PortName.Substring( 0, _PortName.Length - 1 );
 					}
 
-					if ( Cursor == 2 )
+					if ( Cursor == 3 )
 					{
 						if ( !String.IsNullOrEmpty( _JoinName ) )
 							_JoinName = _JoinName.Substring( 0, _JoinName.Length - 1 );
@@ -153,7 +165,7 @@ namespace SharpQuake.Rendering.UI
 					if ( key < 32 || key > 127 )
 						break;
 
-					if ( Cursor == 2 )
+					if ( Cursor == 3 )
 					{
 						if ( _JoinName.Length < 21 )
 							_JoinName += ( Char ) key;
@@ -162,7 +174,7 @@ namespace SharpQuake.Rendering.UI
 					if ( key < '0' || key > '9' )
 						break;
 
-					if ( Cursor == 0 )
+					if ( Cursor == 1 )
 					{
 						if ( _PortName.Length < 5 )
 							_PortName += ( Char ) key;
@@ -184,54 +196,92 @@ namespace SharpQuake.Rendering.UI
 			_PortName = _Port.ToString();
 		}
 
-		public override void Draw( )
-		{
-			Host.Menus.DrawTransPic( 16, 4, Host.Pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" ) );
-			var p = Host.Pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
-			var basex = ( 320 - p.Width ) / 2;
-			Host.Menus.DrawPic( basex, 4, p );
+        private void DrawPlaque( MenuAdorner adorner )
+        {
+            var scale = _menus.UIScale;
+
+            //_menus.DrawTransPic( 16 * scale, 4 * scale, _pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" ), scale: scale );
+            var logoPic = _pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" );
+            _menus.DrawTransPic( adorner.LeftPoint - ( logoPic.Width * _menus.UIScale ), adorner.MidPointY - ( ( logoPic.Height * scale ) / 2 ), logoPic, scale: scale );
+
+            var p = _pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
+            _menus.DrawPic( adorner.MidPointX - ( ( p.Width * scale ) / 2 ), 4 * scale, p, scale: scale );
+        }
+
+        public override void Draw( )
+        {
+            var scale = _menus.UIScale;
+			var lines = 3 + ( JoiningGame ? 2 : 1 ) + ( !String.IsNullOrEmpty( _menus.ReturnReason ) ? 1 : 0 );
+            var adorner = _menus.BuildAdorner( lines, 0, 0, width: 152 );
+
+			DrawPlaque( adorner );
+
+            //_menus.DrawTransPic( 16, 4, _pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" ) );
+			//var p = _pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
+			//var basex = ( 320 - p.Width ) / 2;
+			//_menus.DrawPic( basex, 4, p );
 
 			String startJoin;
 			if ( StartingGame )
 				startJoin = "New Game - TCP/IP";
 			else
-				startJoin = "Join Game - TCP/IP";
+				startJoin = "Join Game - ^4TCP/IP";
 
-			Host.Menus.Print( basex, 32, startJoin );
-			basex += 8;
+            adorner.Label( startJoin, TextAlignment.Centre );
 
-			Host.Menus.Print( basex, 52, "Address:" );
-			Host.Menus.Print( basex + 9 * 8, 52, Host.Network.MyTcpIpAddress );
+            adorner.PrintValue( "Address:", _network.MyTcpIpAddress );
+            adorner.PrintValue( "Port:", _PortName );
 
-			Host.Menus.Print( basex, CursorTable[0], "Port" );
-			Host.Menus.DrawTextBox( basex + 8 * 8, CursorTable[0] - 8, 6, 1 );
-			Host.Menus.Print( basex + 9 * 8, CursorTable[0], _PortName );
+            //_menus.Print( basex, CursorTable[0], "Port" );
+			//_menus.DrawTextBox( basex + 8 * 8, CursorTable[0] - 8, 6, 1 );
+			//_menus.Print( basex + 9 * 8, CursorTable[0], _PortName );
 
 			if ( JoiningGame )
-			{
-				Host.Menus.Print( basex, CursorTable[1], "Search for local games..." );
-				Host.Menus.Print( basex, 108, "Join game at:" );
-				Host.Menus.DrawTextBox( basex + 8, CursorTable[2] - 8, 22, 1 );
-				Host.Menus.Print( basex + 16, CursorTable[2], _JoinName );
+            {
+                adorner.Print( "Search for local games...", TextAlignment.Centre );
+                // _menus.Print( basex, CursorTable[1], "Search for local games..." );
+
+                adorner.PrintValue( "Join game at:", _JoinName );
+                //_menus.Print( basex, 108, "Join game at:" );
+				//_menus.DrawTextBox( basex + 8, CursorTable[2] - 8, 22, 1 );
+				//_menus.Print( basex + 16, CursorTable[2], _JoinName );
 			}
 			else
-			{
-				Host.Menus.DrawTextBox( basex, CursorTable[1] - 8, 2, 1 );
-				Host.Menus.Print( basex + 8, CursorTable[1], "OK" );
+            {
+                adorner.Print( "OK", TextAlignment.Centre );
+
+                //_menus.DrawTextBox( basex, CursorTable[1] - 8, 2, 1 );
+				//_menus.Print( basex + 8, CursorTable[1], "OK" );
 			}
 
-			Host.Menus.DrawCharacter( basex - 8, CursorTable[Cursor], 12 + ( ( Int32 ) ( Host.RealTime * 4 ) & 1 ) );
+			var basex = adorner.MidPointX;
 
-			if ( Cursor == 0 )
-				Host.Menus.DrawCharacter( basex + 9 * 8 + 8 * _PortName.Length,
-					CursorTable[0], 10 + ( ( Int32 ) ( Host.RealTime * 4 ) & 1 ) );
+			_menus.DrawCharacter( basex - 8, adorner.LineY( Cursor )/*CursorTable[Cursor]*/, 12 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 ) );
 
-			if ( Cursor == 2 )
-				Host.Menus.DrawCharacter( basex + 16 + 8 * _JoinName.Length, CursorTable[2],
-					10 + ( ( Int32 ) ( Host.RealTime * 4 ) & 1 ) );
+			var isFlash = ( ( Int32 ) ( Time.Absolute * 4 ) & 1 ) == 0;
 
-			if ( !String.IsNullOrEmpty( Host.Menus.ReturnReason ) )
-				Host.Menus.PrintWhite( basex, 148, Host.Menus.ReturnReason );
-		}
-	}
+			if ( Cursor == 1 )
+			{
+				_menus.DrawCharacter( basex + ( adorner.Padding / 2 ) + _menus.Measure( _PortName ),
+					adorner.LineY( Cursor )/*CursorTable[0]*/, isFlash ? ' ' : '|' /* 10 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 )*/ );
+			}
+
+			if ( Cursor == 3 )
+			{
+				_menus.DrawCharacter( basex + ( adorner.Padding / 2 ) + _menus.Measure( _JoinName ), adorner.LineY( Cursor )/*CursorTable[2]*/,
+                    isFlash ? ' ' : '|'/*10 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 )*/ );
+			}
+
+			if ( !String.IsNullOrEmpty( _menus.ReturnReason ) )
+                adorner.PrintWhite( "_menus.ReturnReason", TextAlignment.Centre );
+            //	_menus.PrintWhite( basex, 148, _menus.ReturnReason );
+        }
+
+
+        private void M_ConfigureNetSubsystem( )
+        {
+			_commands.Buffer.Append( "stopdemo\n" );
+            _network.HostPort = _Port;
+        }
+    }
 }

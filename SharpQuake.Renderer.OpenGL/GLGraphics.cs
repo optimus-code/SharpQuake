@@ -30,6 +30,7 @@ using System.Drawing;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Framework;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace SharpQuake.Renderer.OpenGL
 {
@@ -41,8 +42,17 @@ namespace SharpQuake.Renderer.OpenGL
 
         public override void Fill( Int32 x, Int32 y, Int32 width, Int32 height, Color colour )
         {
+            var hasAlpha = colour.A < 255;
+
+            if ( hasAlpha )
+            {
+                GL.Disable( EnableCap.AlphaTest );
+                GL.Enable( EnableCap.Blend );
+            }
+            //Device.SetBlendMode( "GL_MODULATE" );
+            GL.Enable( EnableCap.Blend );
             GL.Disable( EnableCap.Texture2D );
-            GL.Color3( colour );
+            GL.Color4( colour );
             GL.Begin( PrimitiveType.Quads );
             GL.Vertex2( x, y );
             GL.Vertex2( x + width, y );
@@ -51,6 +61,12 @@ namespace SharpQuake.Renderer.OpenGL
             GL.End( );
             GL.Color3( 1f, 1f, 1f );
             GL.Enable( EnableCap.Texture2D );
+
+            if ( hasAlpha )
+            {
+                GL.Enable( EnableCap.AlphaTest );
+                GL.Disable( EnableCap.Blend );
+            }
         }
 
         public override void DrawTexture2D( BaseTexture texture, RectangleF sourceRect, Rectangle destRect, Color? colour = null, System.Boolean hasAlpha = false )
@@ -60,19 +76,19 @@ namespace SharpQuake.Renderer.OpenGL
                 GL.Disable( EnableCap.AlphaTest );
                 GL.Enable( EnableCap.Blend );
             }
-
             GL.Enable( EnableCap.Texture2D );
-
             texture.Bind( );
 
-            GL.Begin( PrimitiveType.Quads );            
+            Device.SetBlendMode( "GL_MODULATE" ); // Added because when 3d rendering occurs something forces the modulate state to go preventing color
+
+            GL.Begin( PrimitiveType.Quads );
 
             if ( colour.HasValue )
             {
                 if ( hasAlpha )
                     GL.Color4( colour.Value );
                 else
-                    GL.Color3( colour.Value );
+                    GL.Color3( colour.Value.R, colour.Value.G, colour.Value.B );
             }
             else
             {

@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,7 +22,11 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories;
+using SharpQuake.Factories.Rendering.UI;
+using SharpQuake.Networking.Client;
 using SharpQuake.Renderer.Textures;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements
@@ -35,13 +39,22 @@ namespace SharpQuake.Rendering.UI.Elements
             set;
         }
 
-        public Pause( Host host ) : base( host )
+        private readonly Vid _video;
+        private readonly VideoState _videoState;
+        private readonly PictureFactory _pictures;
+        private readonly ClientState _clientState;
+
+        public Pause( Vid video, VideoState videoState, PictureFactory pictures, ClientState clientState )
         {
+            _video = video;
+            _videoState = videoState;
+            _pictures = pictures;
+            _clientState = clientState;
         }
 
         public override void Initialise()
         {
-            Picture = _host.Pictures.Cache( "gfx/pause.lmp", "GL_NEAREST" );
+            Picture = _pictures.Cache( "gfx/pause.lmp", "GL_NEAREST" );
             HasInitialised = true;
         }
 
@@ -55,13 +68,13 @@ namespace SharpQuake.Rendering.UI.Elements
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            if ( !_host.Cvars.ShowPause.Get<Boolean>( ) )	// turn off for screenshots
+            if ( !Cvars.ShowPause.Get<Boolean>( ) )	// turn off for screenshots
                 return;
 
-            if ( !_host.Client.cl.paused )
+            if ( !_clientState.Data.paused )
                 return;
 
-            _host.Video.Device.Graphics.DrawPicture( Picture, ( _host.Screen.vid.width - Picture.Width ) / 2, ( _host.Screen.vid.height - 48 - Picture.Height ) / 2 );
+            _video.Device.Graphics.DrawPicture( Picture, ( _videoState.Data.width - Picture.Width ) / 2, ( _videoState.Data.height - 48 - Picture.Height ) / 2 );
         }
     }
 }

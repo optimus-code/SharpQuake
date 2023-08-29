@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -27,12 +27,20 @@ using System.IO;
 using System.Text;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO;
+using SharpQuake.Framework.IO.FileHandlers;
 using SharpQuake.Game.Client;
+using SharpQuake.Sys;
 
 namespace SharpQuake
 {
     partial class client
     {
+        private IArchiveEntryReader DemoFile
+        {
+            get;
+            set;
+        }
+
         /// <summary>
         /// CL_StopPlayback
         ///
@@ -40,19 +48,22 @@ namespace SharpQuake
         /// </summary>
         public void StopPlayback( )
         {
-            if ( !cls.demoplayback )
+            if ( !_state.StaticData.demoplayback )
                 return;
 
-            if ( cls.demofile != null )
+            if ( _state.StaticData.demofile != null )
             {
-                cls.demofile.Dispose( );
-                cls.demofile = null;
+                _state.StaticData.demofile.Dispose( );
+                _state.StaticData.demofile = null;
             }
-            cls.demoplayback = false;
-            cls.state = cactive_t.ca_disconnected;
+            _keyboard.IsWatchingDemo = false;
+            _state.StaticData.demoplayback = false;
+            _state.StaticData.state = cactive_t.ca_disconnected;
 
-            if ( cls.timedemo )
+            if ( _state.StaticData.timedemo )
                 FinishTimeDemo( );
+
+            DemoFile?.Dispose( );
         }
 
         /// <summary>
@@ -68,19 +79,19 @@ namespace SharpQuake
 
             if ( c != 1 && c != 2 && c != 3 )
             {
-                Host.Console.Print( "record <demoname> [<map> [cd track]]\n" );
+                _logger.Print( "record <demoname> [<map> [cd track]]\n" );
                 return;
             }
 
             if ( msg.Parameters[0].Contains( ".." ) )
             {
-                Host.Console.Print( "Relative pathnames are not allowed.\n" );
+                _logger.Print( "Relative pathnames are not allowed.\n" );
                 return;
             }
 
-            if ( c == 2 && cls.state == cactive_t.ca_connected )
+            if ( c == 2 && _state.StaticData.state == cactive_t.ca_connected )
             {
-                Host.Console.Print( "Can not record - already connected to server\nClient demo recording must be started before connecting\n" );
+                _logger.Print( "Can not record - already connected to server\nClient demo recording must be started before connecting\n" );
                 return;
             }
 
@@ -89,7 +100,7 @@ namespace SharpQuake
             if ( c == 3 )
             {
                 track = MathLib.atoi( msg.Parameters[2] );
-                Host.Console.Print( "Forcing CD track to {0}\n", track );
+                _logger.Print( "Forcing CD track to {0}\n", track );
             }
             else
                 track = -1;
@@ -100,27 +111,27 @@ namespace SharpQuake
             // start the map up
             //
             if ( c > 1 )
-                Host.Commands.ExecuteString( String.Format( "map {0}", msg.Parameters[1] ), CommandSource.Command );
+                _commands.ExecuteString( String.Format( "map {0}", msg.Parameters[1] ), CommandSource.Command );
 
             //
             // open the demo file
             //
             name = Path.ChangeExtension( name, ".dem" );
 
-            Host.Console.Print( "recording to {0}.\n", name );
+            _logger.Print( "recording to {0}.\n", name );
             var fs = FileSystem.OpenWrite( name, true );
             if ( fs == null )
             {
-                Host.Console.Print( "ERROR: couldn't open.\n" );
+                _logger.Print( "ERROR: couldn't open.\n" );
                 return;
             }
             var writer = new BinaryWriter( fs, Encoding.ASCII );
-            cls.demofile = new DisposableWrapper<BinaryWriter>( writer, true );
-            cls.forcetrack = track;
-            var tmp = Encoding.ASCII.GetBytes( cls.forcetrack.ToString( ) );
+            _state.StaticData.demofile = new DisposableWrapper<BinaryWriter>( writer, true );
+            _state.StaticData.forcetrack = track;
+            var tmp = Encoding.ASCII.GetBytes( _state.StaticData.forcetrack.ToString( ) );
             writer.Write( tmp );
             writer.Write( '\n' );
-            cls.demorecording = true;
+            _state.StaticData.demorecording = true;
         }
 
         /// <summary>
@@ -132,25 +143,25 @@ namespace SharpQuake
             if ( msg.Source != CommandSource.Command )
                 return;
 
-            if ( !cls.demorecording )
+            if ( !_state.StaticData.demorecording )
             {
-                Host.Console.Print( "Not recording a demo.\n" );
+                _logger.Print( "Not recording a demo.\n" );
                 return;
             }
 
             // write a disconnect message to the demo file
-            Host.Network.Message.Clear( );
-            Host.Network.Message.WriteByte( ProtocolDef.svc_disconnect );
+            _network.Message.Clear( );
+            _network.Message.WriteByte( ProtocolDef.svc_disconnect );
             WriteDemoMessage( );
 
             // finish up
-            if ( cls.demofile != null )
+            if ( _state.StaticData.demofile != null )
             {
-                cls.demofile.Dispose( );
-                cls.demofile = null;
+                _state.StaticData.demofile.Dispose( );
+                _state.StaticData.demofile = null;
             }
-            cls.demorecording = false;
-            Host.Console.Print( "Completed demo\n" );
+            _state.StaticData.demorecording = false;
+            _logger.Print( "Completed demo\n" );
         }
 
         // CL_PlayDemo_f
@@ -165,7 +176,7 @@ namespace SharpQuake
 
             if ( c != 1 )
             {
-                Host.Console.Print( "play <demoname> : plays a demo\n" );
+                _logger.Print( "play <demoname> : plays a demo\n" );
                 return;
             }
 
@@ -179,24 +190,25 @@ namespace SharpQuake
             //
             var name = Path.ChangeExtension( msg.Parameters[0], ".dem" );
 
-            Host.Console.Print( "Playing demo from {0}.\n", name );
-            if ( cls.demofile != null )
+            _logger.Print( "Playing demo from {0}.\n", name );
+            if ( _state.StaticData.demofile != null )
             {
-                cls.demofile.Dispose( );
+                _state.StaticData.demofile.Dispose( );
             }
             DisposableWrapper<BinaryReader> reader;
-            FileSystem.FOpenFile( name, out reader );
-            cls.demofile = reader;
-            if ( cls.demofile == null )
+            DemoFile = FileSystem.FOpenFile( name, out reader );
+            _state.StaticData.demofile = reader;
+            if ( _state.StaticData.demofile == null )
             {
-                Host.Console.Print( "ERROR: couldn't open.\n" );
-                cls.demonum = -1;		// stop demo loop
+                _logger.Print( "ERROR: couldn't open.\n" );
+                _state.StaticData.demonum = -1;		// stop demo loop
                 return;
             }
 
-            cls.demoplayback = true;
-            cls.state = cactive_t.ca_connected;
-            cls.forcetrack = 0;
+            _keyboard.IsWatchingDemo = true;
+            _state.StaticData.demoplayback = true;
+            _state.StaticData.state = cactive_t.ca_connected;
+            _state.StaticData.forcetrack = 0;
 
             var s = reader.Object;
             c = 0;
@@ -210,13 +222,13 @@ namespace SharpQuake
                 if ( c == '-' )
                     neg = true;
                 else
-                    cls.forcetrack = cls.forcetrack * 10 + ( c - '0' );
+                    _state.StaticData.forcetrack = _state.StaticData.forcetrack * 10 + ( c - '0' );
             }
 
             if ( neg )
-                cls.forcetrack = -cls.forcetrack;
+                _state.StaticData.forcetrack = -_state.StaticData.forcetrack;
             // ZOID, fscanf is evil
-            //	fscanf (cls.demofile, "%i\n", &cls.forcetrack);
+            //	fscanf (_state.StaticData.demofile, "%i\n", &_state.StaticData.forcetrack);
         }
 
         /// <summary>
@@ -232,17 +244,17 @@ namespace SharpQuake
 
             if ( c != 1 )
             {
-                Host.Console.Print( "timedemo <demoname> : gets demo speeds\n" );
+                _logger.Print( "timedemo <demoname> : gets demo speeds\n" );
                 return;
             }
 
             PlayDemo_f( msg );
 
-            // cls.td_starttime will be grabbed at the second frame of the demo, so
+            // _state.StaticData.td_starttime will be grabbed at the second frame of the demo, so
             // all the loading time doesn't get counted
-            _Static.timedemo = true;
-            _Static.td_startframe = Host.FrameCount;
-            _Static.td_lastframe = -1;		// get a new message this frame
+            _state.StaticData.timedemo = true;
+            _state.StaticData.td_startframe = _view.FrameCount;
+            _state.StaticData.td_lastframe = -1;		// get a new message this frame
         }
 
         /// <summary>
@@ -252,40 +264,40 @@ namespace SharpQuake
         /// <returns></returns>
         private Int32 GetMessage( )
         {
-            if ( cls.demoplayback )
+            if ( _state.StaticData.demoplayback )
             {
                 // decide if it is time to grab the next message
-                if ( cls.signon == ClientDef.SIGNONS )	// allways grab until fully connected
+                if ( _state.StaticData.signon == ClientDef.SIGNONS )	// allways grab until fully connected
                 {
-                    if ( cls.timedemo )
+                    if ( _state.StaticData.timedemo )
                     {
-                        if ( Host.FrameCount == cls.td_lastframe )
+                        if ( _view.FrameCount == _state.StaticData.td_lastframe )
                             return 0;		// allready read this frame's message
-                        cls.td_lastframe = Host.FrameCount;
+                        _state.StaticData.td_lastframe = _view.FrameCount;
                         // if this is the second frame, grab the real td_starttime
                         // so the bogus time on the first frame doesn't count
-                        if ( Host.FrameCount == cls.td_startframe + 1 )
-                            cls.td_starttime = ( Single ) Host.RealTime;
+                        if ( _view.FrameCount == _state.StaticData.td_startframe + 1 )
+                            _state.StaticData.td_starttime = ( Single ) Time.Absolute;
                     }
-                    else if ( cl.time <= cl.mtime[0] )
+                    else if ( _state.Data.time <= _state.Data.mtime[0] )
                     {
                         return 0;	// don't need another message yet
                     }
                 }
 
                 // get the next message
-                var reader = ( ( DisposableWrapper<BinaryReader> ) cls.demofile ).Object;
+                var reader = ( ( DisposableWrapper<BinaryReader> ) _state.StaticData.demofile ).Object;
                 var size = EndianHelper.LittleLong( reader.ReadInt32( ) );
                 if ( size > QDef.MAX_MSGLEN )
                     Utilities.Error( "Demo message > MAX_MSGLEN" );
 
-                cl.mviewangles[1] = cl.mviewangles[0];
-                cl.mviewangles[0].X = EndianHelper.LittleFloat( reader.ReadSingle( ) );
-                cl.mviewangles[0].Y = EndianHelper.LittleFloat( reader.ReadSingle( ) );
-                cl.mviewangles[0].Z = EndianHelper.LittleFloat( reader.ReadSingle( ) );
+                _state.Data.mviewangles[1] = _state.Data.mviewangles[0];
+                _state.Data.mviewangles[0].X = EndianHelper.LittleFloat( reader.ReadSingle( ) );
+                _state.Data.mviewangles[0].Y = EndianHelper.LittleFloat( reader.ReadSingle( ) );
+                _state.Data.mviewangles[0].Z = EndianHelper.LittleFloat( reader.ReadSingle( ) );
 
-                Host.Network.Message.FillFrom( reader.BaseStream, size );
-                if ( Host.Network.Message.Length < size )
+                _network.Message.FillFrom( reader.BaseStream, size );
+                if ( _network.Message.Length < size )
                 {
                     StopPlayback( );
                     return 0;
@@ -296,19 +308,19 @@ namespace SharpQuake
             Int32 r;
             while ( true )
             {
-                r = Host.Network.GetMessage( cls.netcon );
+                r = _network.GetMessage( _state.StaticData.netcon );
 
                 if ( r != 1 && r != 2 )
                     return r;
 
                 // discard nop keepalive message
-                if ( Host.Network.Message.Length == 1 && Host.Network.Message.Data[0] == ProtocolDef.svc_nop )
-                    Host.Console.Print( "<-- server to client keepalive\n" );
+                if ( _network.Message.Length == 1 && _network.Message.Data[0] == ProtocolDef.svc_nop )
+                    _logger.Print( "<-- server to client keepalive\n" );
                 else
                     break;
             }
 
-            if ( cls.demorecording )
+            if ( _state.StaticData.demorecording )
                 WriteDemoMessage( );
 
             return r;
@@ -319,14 +331,14 @@ namespace SharpQuake
         /// </summary>
         private void FinishTimeDemo( )
         {
-            cls.timedemo = false;
+            _state.StaticData.timedemo = false;
 
             // the first frame didn't count
-            var frames = ( Host.FrameCount - cls.td_startframe ) - 1;
-            var time = ( Single ) Host.RealTime - cls.td_starttime;
+            var frames = ( _view.FrameCount - _state.StaticData.td_startframe ) - 1;
+            var time = ( Single ) Time.Absolute - _state.StaticData.td_starttime;
             if ( time == 0 )
                 time = 1;
-            Host.Console.Print( "{0} frames {1:F5} seconds {2:F2} fps\n", frames, time, frames / time );
+            _logger.Print( "{0} frames {1:F5} seconds {2:F2} fps\n", frames, time, frames / time );
         }
 
         /// <summary>
@@ -335,13 +347,13 @@ namespace SharpQuake
         /// </summary>
         private void WriteDemoMessage( )
         {
-            var len = EndianHelper.LittleLong( Host.Network.Message.Length );
-            var writer = ( ( DisposableWrapper<BinaryWriter> ) cls.demofile ).Object;
+            var len = EndianHelper.LittleLong( _network.Message.Length );
+            var writer = ( ( DisposableWrapper<BinaryWriter> ) _state.StaticData.demofile ).Object;
             writer.Write( len );
-            writer.Write( EndianHelper.LittleFloat( cl.viewangles.X ) );
-            writer.Write( EndianHelper.LittleFloat( cl.viewangles.Y ) );
-            writer.Write( EndianHelper.LittleFloat( cl.viewangles.Z ) );
-            writer.Write( Host.Network.Message.Data, 0, Host.Network.Message.Length );
+            writer.Write( EndianHelper.LittleFloat( _state.Data.viewangles.X ) );
+            writer.Write( EndianHelper.LittleFloat( _state.Data.viewangles.Y ) );
+            writer.Write( EndianHelper.LittleFloat( _state.Data.viewangles.Z ) );
+            writer.Write( _network.Message.Data, 0, _network.Message.Length );
             writer.Flush( );
         }
     }

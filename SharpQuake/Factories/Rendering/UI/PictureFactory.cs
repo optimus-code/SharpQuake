@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -35,12 +35,12 @@ namespace SharpQuake.Factories.Rendering.UI
     /// </summary>
     public class PictureFactory : BaseFactory<String, BasePicture>
 	{
-		private Host _host;
+        private readonly Vid _video;
 
-		public void Initialise( Host host )
+        public PictureFactory( Vid video )
         {
-			_host = host;
-		}
+            _video = video;
+        }
 
         /// <summary>
         /// TODO - Add proper texture cleanup
@@ -64,7 +64,7 @@ namespace SharpQuake.Factories.Rendering.UI
 			if ( DictionaryItems.Count == DrawDef.MAX_CACHED_PICS )
 				Utilities.Error( "menu_numcachepics == MAX_CACHED_PICS" );
 
-			var picture = BasePicture.FromFile( _host.Video.Device, path, filter, ignoreAtlas );
+			var picture = BasePicture.FromFile( _video.Device, path, filter, ignoreAtlas );
 
 			if ( picture != null )
 				Add( path, picture );

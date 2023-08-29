@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,6 +23,8 @@
 /// </copyright>
 
 using SharpQuake.Framework;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 using System;
 using System.Text;
 
@@ -40,15 +42,26 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private HudResources _resources;
 
-        public MPMiniScoreboard( Host host ) : base( host )
+        private readonly Scr _screen;
+        private readonly Vid _video;
+        private readonly Drawer _drawer;
+        private readonly ClientState _clientState;
+        private readonly VideoState _videoState;
+
+        public MPMiniScoreboard( Scr screen, Vid video, Drawer drawer, ClientState clientState, VideoState videoState )
         {
+            _screen = screen;
+            _video = video;
+            _drawer = drawer;
+            _clientState = clientState;
+            _videoState = videoState;
         }
 
         public override void Initialise( )
         {
             base.Initialise( );
 
-            _resources = _host.Screen.HudResources;
+            _resources = _screen.HudResources;
 
             HasInitialised = true;
         }
@@ -63,18 +76,18 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            if ( _host.Screen.vid.width < 512 || _resources.Lines == 0 )
+            if ( _videoState.Data.width < 512 || _resources.Lines == 0 )
                 return;
 
-            _host.Screen.CopyEverithing = true;
-            _host.Screen.FullUpdate = 0;
+            _videoState.ScreenCopyEverything = true;
+            _screen.FullUpdate = 0;
 
             // scores
             _resources.SortFrags( );
 
             // draw the text
             var l = _resources._ScoreBoardLines;
-            var y = _host.Screen.vid.height - _resources.Lines;
+            var y = _videoState.Data.height - _resources.Lines;
             var numlines = _resources.Lines / 8;
             if ( numlines < 3 )
                 return;
@@ -82,7 +95,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
             //find us
             Int32 i;
             for ( i = 0; i < _resources._ScoreBoardLines; i++ )
-                if ( _resources._FragSort[i] == _host.Client.cl.viewentity - 1 )
+                if ( _resources._FragSort[i] == _clientState.Data.viewentity - 1 )
                     break;
 
             if ( i == _resources._ScoreBoardLines ) // we're not there
@@ -92,14 +105,15 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
             if ( i > _resources._ScoreBoardLines - numlines )
                 i = _resources._ScoreBoardLines - numlines;
+
             if ( i < 0 )
                 i = 0;
 
             var x = 324;
-            for ( ; i < _resources._ScoreBoardLines && y < _host.Screen.vid.height - 8; i++ )
+            for ( ; i < _resources._ScoreBoardLines && y < _videoState.Data.height - 8; i++ )
             {
                 var k = _resources._FragSort[i];
-                var s = _host.Client.cl.scores[k];
+                var s = _clientState.Data.scores[k];
                 if ( String.IsNullOrEmpty( s.name ) )
                     continue;
 
@@ -109,23 +123,23 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
                 top = _resources.ColorForMap( top );
                 bottom = _resources.ColorForMap( bottom );
 
-                _host.Video.Device.Graphics.FillUsingPalette( x, y + 1, 40, 3, top );
-                _host.Video.Device.Graphics.FillUsingPalette( x, y + 4, 40, 4, bottom );
+                _video.Device.Graphics.FillUsingPalette( x, y + 1, 40, 3, top );
+                _video.Device.Graphics.FillUsingPalette( x, y + 4, 40, 4, bottom );
 
                 // draw number
                 var num = s.frags.ToString( ).PadLeft( 3 );
-                _host.DrawingContext.DrawCharacter( x + 8, y, num[0] );
-                _host.DrawingContext.DrawCharacter( x + 16, y, num[1] );
-                _host.DrawingContext.DrawCharacter( x + 24, y, num[2] );
+                _drawer.DrawCharacter( x + 8, y, num[0] );
+                _drawer.DrawCharacter( x + 16, y, num[1] );
+                _drawer.DrawCharacter( x + 24, y, num[2] );
 
-                if ( k == _host.Client.cl.viewentity - 1 )
+                if ( k == _clientState.Data.viewentity - 1 )
                 {
-                    _host.DrawingContext.DrawCharacter( x, y, 16 );
-                    _host.DrawingContext.DrawCharacter( x + 32, y, 17 );
+                    _drawer.DrawCharacter( x, y, 16 );
+                    _drawer.DrawCharacter( x + 32, y, 17 );
                 }
 
                 // draw name
-                _host.DrawingContext.DrawString( x + 48, y, s.name );
+                _drawer.DrawString( x + 48, y, s.name );
 
                 y += 8;
             }

@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,12 +23,13 @@
 /// </copyright>
 
 using System;
-using System.Text;
 using SharpQuake.Factories.Rendering.UI;
-using SharpQuake.Framework.Rendering.UI;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO;
-using SharpQuake.Renderer.Textures;
+using SharpQuake.Sys;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Networking.Client;
+using System.Windows.Forms;
 
 // sbar.h
 
@@ -61,17 +62,31 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private HudResources _resources;
 
-        public Hud( Host host ) : base( host )
+        private readonly Scr _screen;
+        private readonly Vid _video;
+        private readonly Drawer _drawer;
+        private readonly CommandFactory _commands;
+        private readonly ClientState _clientState;
+        private readonly VideoState _videoState;
+
+        public Hud( Scr screen, Vid video, Drawer drawer, CommandFactory commands,
+            ClientState clientState, VideoState videoState )
         {
+            _screen = screen;
+            _video = video;
+            _commands = commands;
+            _drawer = drawer;
+            _clientState = clientState;
+            _videoState = videoState;
         }
 
         // Sbar_Init
         public override void Initialise( )
         {
-            _resources = _host.Screen.HudResources;
+            _resources = _screen.HudResources;
             base.Initialise( );
-            _host.Commands.Add( "+showscores", ShowScores );
-            _host.Commands.Add( "-showscores", DontShowScores );
+            _commands.Add( "+showscores", ShowScores );
+            _commands.Add( "-showscores", DontShowScores );
 
             HasInitialised = true;
         }
@@ -83,37 +98,125 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
             _Updates = 0;	// update next frame
         }
 
+        private void DrawStat( Int32 x, Int32 y, String label, String value )
+        {
+            var padding = _drawer.MeasureCharacter( 'T', forceCharset: true );
+            var boxWidth = padding * 7;
+            var boxHeight = padding * 4;
+            var valueWidth = _drawer.MeasureString( value, isBigFont: true );
+            var labelWidth = _drawer.MeasureString( label );
+            var innerWidth = boxWidth - ( padding * 2 );
+            var innerHeight = boxHeight - ( padding * 2 );
+            var contentsHeight = _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( );
+            var spacing = 8;
+            var yAdvance = y + ( boxHeight / 2 ) - ( contentsHeight / 2 ) - spacing;
+
+            _drawer.DrawFrame( x, y, boxWidth, boxHeight, 4 );
+
+            _drawer.DrawString( x + ( boxWidth / 2 ) - ( valueWidth / 2 ), yAdvance, value, isBigFont: true );
+
+            yAdvance += _drawer.CharacterAdvanceHeight( isBigFont: true ) + spacing;
+
+            _drawer.DrawString( x + ( boxWidth / 2 ) - ( labelWidth / 2 ), yAdvance, label );
+        }
+
+        private void DrawNewHUD()
+        {
+            var cl = _clientState.Data;
+            var sW = _videoState.Data.width;
+            var sH = _videoState.Data.height;
+            //var padding = _drawer.MeasureCharacter( 'T' );
+            //var boxWidth = _drawer.MeasureCharacter( 'T', isBigFont: true ) * 4 + ( padding * 2 );
+            //var boxHeight = ( _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( ) ) + ( padding * 2 );
+
+            var padding = _drawer.MeasureCharacter( 'T', forceCharset: true );
+            var boxWidth = padding * 7;
+            var boxHeight = padding * 4;
+
+            DrawStat( padding, sH - boxHeight - padding, "Health", cl.stats[QStatsDef.STAT_HEALTH].ToString( ) );
+
+            if ( cl.stats[QStatsDef.STAT_ARMOR] > 0 )
+            {
+                DrawStat( padding + ( ( boxWidth + padding ) * 1 ), sH - boxHeight - padding, "Armor", cl.stats[QStatsDef.STAT_ARMOR].ToString( ) );
+                DrawStat( padding + ( ( boxWidth + padding ) * 2 ), sH - boxHeight - padding, "Ammo", cl.stats[QStatsDef.STAT_AMMO].ToString( ) );
+            }
+            else
+            {
+                DrawStat( padding + ( ( boxWidth + padding ) * 1 ), sH - boxHeight - padding, "Ammo", cl.stats[QStatsDef.STAT_AMMO].ToString( ) );
+            }
+
+            //var padding = _drawer.MeasureCharacter( 'T' );
+
+            //var boxWidth = _drawer.MeasureCharacter( 'T', isBigFont: true ) * 4 + ( padding * 2 );
+
+            //_video.Device.Graphics.Fill(
+            //    0,
+            //    sH - ( _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( ) ) - ( padding * 3 ),
+            //    boxWidth,
+            //    ( _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( ) ) + ( padding * 3 ),
+            //    System.Drawing.Color.FromArgb( 120, 0, 0, 0 ) );
+
+            //// Health
+            //_drawer.DrawString( padding * 2, sH - ( _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( ) ) - ( padding * 2 ), cl.stats[QStatsDef.STAT_HEALTH].ToString(), isBigFont: true );
+            //_drawer.DrawString( padding * 2, sH -_drawer.CharacterAdvanceHeight( ) - ( padding ), "Health" );
+
+            ////_resources.DrawNum( 248, 0, cl.stats[QStatsDef.STAT_AMMO], 3, cl.stats[QStatsDef.STAT_AMMO] <= 10 ? 1 : 0 );
+            //// Ammo
+
+            //var ammoString = cl.stats[QStatsDef.STAT_AMMO].ToString( );
+            //var ammoWidth = _drawer.MeasureString( ammoString, isBigFont: true );
+            //var ammoX = sW - ammoWidth - ( padding * 2 );
+            //var ammoLabelX = sW - _drawer.MeasureString( "Ammo" ) - ( padding * 2 );
+
+            //_video.Device.Graphics.Fill( 
+            //    sW - boxWidth, 
+            //    sH - ( _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( ) ) - ( padding * 3 ),
+            //    boxWidth,
+            //    ( _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( ) ) + ( padding * 3 ),
+            //    System.Drawing.Color.FromArgb( 120, 0, 0, 0 ) );
+
+
+            //_drawer.DrawString( ammoX, sH - ( _drawer.CharacterAdvanceHeight( isBigFont: true ) + _drawer.CharacterAdvanceHeight( ) ) - ( padding * 2 ), ammoString, isBigFont: true );
+            //_drawer.DrawString( ammoLabelX, sH - _drawer.CharacterAdvanceHeight( ) - ( padding ), "Ammo" );
+
+        }
+
         // Sbar_Draw
         // called every frame by screen
         public override void Draw( )
         {
             base.Draw( );
 
-            if ( _host == null || !HasInitialised )
+            if ( _screen == null || !HasInitialised )
                 return;
 
-            var vid = _host.Screen.vid;
-            if ( _host.Screen.Elements.Get<VisualConsole>( ElementFactory.CONSOLE )?.ConCurrent == vid.height )
+            var vid = _videoState.Data;
+            if ( _screen.Elements.Get<VisualConsole>( ElementFactory.CONSOLE )?.ConCurrent == vid.height )
                 return;		// console is full screen
 
+            if ( Cvars.NewUI?.Get<Boolean>() == true )
+            {
+                DrawNewHUD( );
+                return;
+            }
             if ( _Updates >= vid.numpages )
                 return;
 
-            _host.Screen.CopyEverithing = true;
+            _videoState.ScreenCopyEverything = true;
 
             _Updates++;
 
             if ( _resources.Lines > 0 && vid.width > 320 )
-                _host.DrawingContext.TileClear( 0, vid.height - _resources.Lines, vid.width, _resources.Lines );
+                _drawer.TileClear( 0, vid.height - _resources.Lines, vid.width, _resources.Lines );
 
             if ( _resources.Lines > 24 )
             {
                 DrawInventory( );
-                if ( _host.Client.cl.maxclients != 1 )
-                    _host.Screen.Elements.Draw( ElementFactory.FRAGS );
+                if ( _clientState.Data.maxclients != 1 )
+                    _screen.Elements.Draw( ElementFactory.FRAGS );
             }
 
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
             if ( _ShowScores || cl.stats[QStatsDef.STAT_HEALTH] <= 0 )
             {
                 DrawScoreboard( );
@@ -125,7 +228,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
                 // keys (hipnotic only)
                 //MED 01/04/97 moved keys here so they would not be overwritten
-                if ( MainWindow.Common.GameKind == GameKind.Hipnotic )
+                if ( Engine.Common.GameKind == GameKind.Hipnotic )
                 {
                     if ( cl.HasItems( QItemsDef.IT_KEY1 ) )
                         _resources.DrawPic( 209, 3, _resources.Items[0] );
@@ -136,11 +239,11 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
                 if ( cl.HasItems( QItemsDef.IT_INVULNERABILITY ) )
                 {
                     _resources.DrawNum( 24, 0, 666, 3, 1 );
-                    _host.Video.Device.Graphics.DrawPicture( _host.Screen.Elements.Get<LoadingDisc>( ElementFactory.DISC )?.Disc, 0, 0 );
+                    _video.Device.Graphics.DrawPicture( _screen.Elements.Get<LoadingDisc>( ElementFactory.DISC )?.Disc, 0, 0 );
                 }
                 else
                 {
-                    if ( MainWindow.Common.GameKind == GameKind.Rogue )
+                    if ( Engine.Common.GameKind == GameKind.Rogue )
                     {
                         _resources.DrawNum( 24, 0, cl.stats[QStatsDef.STAT_ARMOR], 3, cl.stats[QStatsDef.STAT_ARMOR] <= 25 ? 1 : 0 ); // uze: corrected color param
                         if ( cl.HasItems( QItemsDef.RIT_ARMOR3 ) )
@@ -169,7 +272,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
                 _resources.DrawNum( 136, 0, cl.stats[QStatsDef.STAT_HEALTH], 3, cl.stats[QStatsDef.STAT_HEALTH] <= 25 ? 1 : 0 );
 
                 // ammo icon
-                if ( MainWindow.Common.GameKind == GameKind.Rogue )
+                if ( Engine.Common.GameKind == GameKind.Rogue )
                 {
                     if ( cl.HasItems( QItemsDef.RIT_SHELLS ) )
                         _resources.DrawPic( 224, 0, _resources.Ammo[0] );
@@ -203,14 +306,14 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
             if ( vid.width > 320 )
             {
-                if ( _host.Client.cl.gametype == ProtocolDef.GAME_DEATHMATCH )
+                if ( _clientState.Data.gametype == ProtocolDef.GAME_DEATHMATCH )
                     MiniDeathmatchOverlay( );
             }
         }
 
         private void DrawInventoryWeapons( ref Int32 flashon )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             for ( var i = 0; i < 7; i++ )
             {
@@ -238,7 +341,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventoryHipnoticWeapons( ref Int32 flashon )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
             var grenadeflashing = 0;
 
             for ( var i = 0; i < 4; i++ )
@@ -295,7 +398,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventoryRogueWeapons( )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             // check for powered up weapon.
             if ( cl.stats[QStatsDef.STAT_ACTIVEWEAPON] >= QItemsDef.RIT_LAVA_NAILGUN )
@@ -306,7 +409,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventoryAmmoCounts( )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             for ( var i = 0; i < 4; i++ )
             {
@@ -323,7 +426,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventoryItems( Int32 flashon )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             for ( var i = 0; i < 6; i++ )
             {
@@ -337,7 +440,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
                     else
                     {
                         //MED 01/04/97 changed keys
-                        if ( MainWindow.Common.GameKind != GameKind.Hipnotic || ( i > 1 ) )
+                        if ( Engine.Common.GameKind != GameKind.Hipnotic || ( i > 1 ) )
                         {
                             _resources.DrawPic( 192 + i * 16, -16, _resources.Items[i] );
                         }
@@ -350,7 +453,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventoryHipnoticItems( Int32 flashon )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             for ( var i = 0; i < 2; i++ )
             {
@@ -373,7 +476,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventoryRogueItems( Int32 flashon )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             for ( var i = 0; i < 2; i++ )
             {
@@ -398,7 +501,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventorySigils( Int32 flashon )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             for ( var i = 0; i < 4; i++ )
             {
@@ -424,7 +527,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private void DrawInventoryRogueIBar()
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             if ( cl.stats[QStatsDef.STAT_ACTIVEWEAPON] >= QItemsDef.RIT_LAVA_NAILGUN )
                 _resources.DrawPic( 0, -24, _resources.RInvBar[0] );
@@ -437,7 +540,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
         {
             var flashon = 0;
 
-            if ( MainWindow.Common.GameKind == GameKind.Rogue )
+            if ( Engine.Common.GameKind == GameKind.Rogue )
                 DrawInventoryRogueIBar();
             else
                 DrawInventoryIBar();
@@ -447,10 +550,10 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
             // MED 01/04/97
             // hipnotic weapons
-            if ( MainWindow.Common.GameKind == GameKind.Hipnotic )
+            if ( Engine.Common.GameKind == GameKind.Hipnotic )
                 DrawInventoryHipnoticWeapons( ref flashon );
 
-            if ( MainWindow.Common.GameKind == GameKind.Rogue )
+            if ( Engine.Common.GameKind == GameKind.Rogue )
                 DrawInventoryRogueWeapons();
 
             // ammo counts
@@ -463,10 +566,10 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
             //MED 01/04/97 added hipnotic items
             // hipnotic items
-            if ( MainWindow.Common.GameKind == GameKind.Hipnotic )
+            if ( Engine.Common.GameKind == GameKind.Hipnotic )
                 DrawInventoryHipnoticItems( flashon );
 
-            if ( MainWindow.Common.GameKind == GameKind.Rogue ) // new rogue items
+            if ( Engine.Common.GameKind == GameKind.Rogue ) // new rogue items
                 DrawInventoryRogueItems( flashon );
             else // sigils
                 DrawInventorySigils( flashon );
@@ -476,21 +579,21 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
         private void DrawScoreboard( )
         {
             SoloScoreboard( );
-            if ( _host.Client.cl.gametype == ProtocolDef.GAME_DEATHMATCH )
+            if ( _clientState.Data.gametype == ProtocolDef.GAME_DEATHMATCH )
                 DeathmatchOverlay( );
         }
 
         // Sbar_DrawFace
         private void DrawFace( )
         {
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
             // PGM 01/19/97 - team color drawing
             // PGM 03/02/97 - fixed so color swatch only appears in CTF modes
-            if ( MainWindow.Common.GameKind == GameKind.Rogue &&
-                ( _host.Client.cl.maxclients != 1 ) &&
-                ( _host.Cvars.TeamPlay.Get<Int32>( ) > 3 ) &&
-                ( _host.Cvars.TeamPlay.Get<Int32>( ) < 7 ) )
+            if ( Engine.Common.GameKind == GameKind.Rogue &&
+                ( _clientState.Data.maxclients != 1 ) &&
+                ( Cvars.TeamPlay.Get<Int32>( ) > 3 ) &&
+                ( Cvars.TeamPlay.Get<Int32>( ) < 7 ) )
             {
                 var s = cl.scores[cl.viewentity - 1];
 
@@ -504,11 +607,11 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
                 if ( cl.gametype == ProtocolDef.GAME_DEATHMATCH )
                     xofs = 113;
                 else
-                    xofs = ( ( _host.Screen.vid.width - 320 ) >> 1 ) + 113;
+                    xofs = ( ( _videoState.Data.width - 320 ) >> 1 ) + 113;
 
                 _resources.DrawPic( 112, 0, _resources.RTeamBord );
-                _host.Video.Device.Graphics.FillUsingPalette( xofs, _host.Screen.vid.height - HudResources.SBAR_HEIGHT + 3, 22, 9, top );
-                _host.Video.Device.Graphics.FillUsingPalette( xofs, _host.Screen.vid.height - HudResources.SBAR_HEIGHT + 12, 22, 9, bottom );
+                _video.Device.Graphics.FillUsingPalette( xofs, _videoState.Data.height - HudResources.SBAR_HEIGHT + 3, 22, 9, top );
+                _video.Device.Graphics.FillUsingPalette( xofs, _videoState.Data.height - HudResources.SBAR_HEIGHT + 12, 22, 9, bottom );
 
                 // draw number
                 var num = s.frags.ToString( ).PadLeft( 3 );
@@ -574,19 +677,19 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
         // Sbar_DeathmatchOverlay
         private void MiniDeathmatchOverlay( )
         {
-            _host.Screen.Elements.Draw( ElementFactory.MP_MINI_SCOREBOARD );
+            _screen.Elements.Draw( ElementFactory.MP_MINI_SCOREBOARD );
         }
 
         // Sbar_SoloScoreboard
         private void SoloScoreboard( )
         {
-            _host.Screen.Elements.Draw( ElementFactory.SP_SCOREBOARD );            
+            _screen.Elements.Draw( ElementFactory.SP_SCOREBOARD );            
         }
 
         // Sbar_DeathmatchOverlay
         private void DeathmatchOverlay( )
         {
-            _host.Screen.Elements.Draw( ElementFactory.MP_SCOREBOARD );            
+            _screen.Elements.Draw( ElementFactory.MP_SCOREBOARD );            
         }
 
         // Sbar_ShowScores

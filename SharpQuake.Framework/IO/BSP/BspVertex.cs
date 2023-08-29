@@ -22,7 +22,9 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Framework.Mathematics;
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace SharpQuake.Framework
@@ -30,9 +32,17 @@ namespace SharpQuake.Framework
     [StructLayout( LayoutKind.Sequential, Pack = 1 )]
     public struct BspVertex
     {
-        [MarshalAs( UnmanagedType.ByValArray, SizeConst = 3 )]
-        public Single[] point; //[3];
+        //[MarshalAs( UnmanagedType.ByValArray, SizeConst = 3 )]
+        //public Single[] point; //[3];
+        public Vector3 point;
 
         public static Int32 SizeInBytes = Marshal.SizeOf( typeof( BspVertex ) );
+
+        public static BspVertex FromBR( BinaryReader br )
+        {
+            var result = new BspVertex( );
+            result.point = new Vector3( br.ReadSingle( ), br.ReadSingle( ), br.ReadSingle( ) );
+            return result;
+        }
     } // dvertex_t
 }

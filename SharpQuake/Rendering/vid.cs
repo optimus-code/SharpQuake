@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -24,10 +24,17 @@
 
 using System;
 using System.IO;
+using SharpQuake.Desktop;
+using SharpQuake.Factories.Rendering;
 using SharpQuake.Framework;
 using SharpQuake.Framework.Definitions;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.IO;
+using SharpQuake.Framework.Logging;
+using SharpQuake.Logging;
 using SharpQuake.Renderer;
+using SharpQuake.Rendering;
+using SharpQuake.Sys;
 
 // vid.h -- video driver defs
 
@@ -36,7 +43,7 @@ namespace SharpQuake
 	/// <summary>
 	/// Vid_functions
 	/// </summary>
-	public class Vid
+	public class Vid : IDisposable
     {
         public UInt16[] Table8to16
         {
@@ -66,7 +73,7 @@ namespace SharpQuake
         {
             get
             {
-                return Host.Cvars.glZTrick.Get<Boolean>( );
+                return Cvars.glZTrick.Get<Boolean>( );
             }
         }
 
@@ -74,7 +81,7 @@ namespace SharpQuake
         {
             get
             {
-                return Host.Cvars.WindowedMouse.Get<Boolean>( );
+                return Cvars.WindowedMouse.Get<Boolean>( );
             }
         }
 
@@ -82,7 +89,7 @@ namespace SharpQuake
         {
             get
             {
-                return Host.Cvars.Wait.Get<Boolean>( );
+                return Cvars.Wait.Get<Boolean>( );
             }
         }
 
@@ -94,50 +101,61 @@ namespace SharpQuake
             }
         }    
        
-        // Instances
-        private Host Host
-        {
-            get;
-            set;
-        }
-
         public BaseDevice Device
         {
             get
             {
-                return Host.MainWindow.Device;
+                return _window.Device;
             }
         }
 
-        public Vid( Host host )
+        private readonly IConsoleLogger _logger;
+        private readonly IKeyboardInput _keyboard;
+        private readonly IMouseInput _mouse;
+        private readonly CommandFactory _commands;
+        private readonly ClientVariableFactory _cvars;
+        private readonly cd_audio _cdAudio;
+        private readonly MainWindow _window;
+        private readonly VideoState _videoState;
+
+        public Vid( IConsoleLogger logger, IKeyboardInput keyboard, IMouseInput mouse, 
+            CommandFactory commands, ClientVariableFactory cvars, cd_audio cdAudio,
+            MainWindow window, VideoState videoState )
         {
-            Host = host;
+            _logger = logger;
+            _keyboard = keyboard;
+            _mouse = mouse;
+            _commands = commands;
+            _cvars = cvars;
+            _cdAudio = cdAudio;
+            _window = window;
+            _videoState = videoState;
         }
 
         private void InitialiseClientVariables()
 		{
-            if ( Host.Cvars.glZTrick == null )
+            if ( Cvars.glZTrick == null )
             {
-                Host.Cvars.glZTrick = Host.CVars.Add( "gl_ztrick", true );
-                Host.Cvars.Mode = Host.CVars.Add( "vid_mode", 0 );
-                Host.Cvars.DefaultMode = Host.CVars.Add( "_vid_default_mode", 0, ClientVariableFlags.Archive );
-                Host.Cvars.DefaultModeWin = Host.CVars.Add( "_vid_default_mode_win", 3, ClientVariableFlags.Archive );
-                Host.Cvars.Wait = Host.CVars.Add( "vid_wait", false );
-                Host.Cvars.NoPageFlip = Host.CVars.Add( "vid_nopageflip", 0, ClientVariableFlags.Archive );
-                Host.Cvars.WaitOverride = Host.CVars.Add( "_vid_wait_override", 0, ClientVariableFlags.Archive );
-                Host.Cvars.ConfigX = Host.CVars.Add( "vid_config_x", 800, ClientVariableFlags.Archive );
-                Host.Cvars.ConfigY = Host.CVars.Add( "vid_config_y", 600, ClientVariableFlags.Archive );
-                Host.Cvars.StretchBy2 = Host.CVars.Add( "vid_stretch_by_2", 1, ClientVariableFlags.Archive );
-                Host.Cvars.WindowedMouse = Host.CVars.Add( "_windowed_mouse", true, ClientVariableFlags.Archive );
+                Cvars.glZTrick = _cvars.Add( "gl_ztrick", true );
+                Cvars.Mode = _cvars.Add( "vid_mode", 0 );
+                Cvars.DefaultMode = _cvars.Add( "_vid_default_mode", 0, ClientVariableFlags.Archive );
+                Cvars.DefaultModeWin = _cvars.Add( "_vid_default_mode_win", 3, ClientVariableFlags.Archive );
+                Cvars.Wait = _cvars.Add( "vid_wait", false );
+                Cvars.NoPageFlip = _cvars.Add( "vid_nopageflip", 0, ClientVariableFlags.Archive );
+                Cvars.WaitOverride = _cvars.Add( "_vid_wait_override", 0, ClientVariableFlags.Archive );
+                Cvars.ConfigX = _cvars.Add( "vid_config_x", 800, ClientVariableFlags.Archive );
+                Cvars.ConfigY = _cvars.Add( "vid_config_y", 600, ClientVariableFlags.Archive );
+                Cvars.StretchBy2 = _cvars.Add( "vid_stretch_by_2", 1, ClientVariableFlags.Archive );
+                Cvars.WindowedMouse = _cvars.Add( "_windowed_mouse", true, ClientVariableFlags.Archive );
             }
         }
 
         private void InitialiseCommands()
 		{
-            Host.Commands.Add( "vid_nummodes", NumModes_f );
-            Host.Commands.Add( "vid_describecurrentmode", DescribeCurrentMode_f );
-            Host.Commands.Add( "vid_describemode", DescribeMode_f );
-            Host.Commands.Add( "vid_describemodes", DescribeModes_f );
+            _commands.Add( "vid_nummodes", NumModes_f );
+            _commands.Add( "vid_describecurrentmode", DescribeCurrentMode_f );
+            _commands.Add( "vid_describemode", DescribeMode_f );
+            _commands.Add( "vid_describemodes", DescribeModes_f );
         }
 
         /// <summary>
@@ -155,18 +173,18 @@ namespace SharpQuake
             Device.Initialise( palette );
 
             UpdateConsole( );
-            UpdateScreen( );
 
             // Moved from SetMode
 
             // so Con_Printfs don't mess us up by forcing vid and snd updates
-            var temp = Host.Screen.IsDisabledForLoading;
-            Host.Screen.IsDisabledForLoading = true;
-            Host.CDAudio.Pause( );
+            var temp = _videoState.IsScreenDisabledForLoading;
+            _videoState.IsScreenDisabledForLoading = true;
+
+            _cdAudio.Pause( );
 
             Device.SetMode( Device.ChosenMode, palette );
 
-            var vid = Host.Screen.vid;
+            var vid = _videoState.Data;
 
             UpdateConsole( false );
 
@@ -174,41 +192,34 @@ namespace SharpQuake
             vid.height = Device.Desc.Height;
             vid.numpages = 2;
 
-            Host.CDAudio.Resume( );
-            Host.Screen.IsDisabledForLoading = temp;
+            _cdAudio.Resume( );
 
-            Host.CVars.Set( "vid_mode", Device.ChosenMode );
+            _videoState.IsScreenDisabledForLoading = temp;
+
+            _cvars.Set( "vid_mode", Device.ChosenMode );
 
             // fix the leftover Alt from any Alt-Tab or the like that switched us away
             ClearAllStates( );
 
-            Host.Console.SafePrint( "Video mode {0} initialized.\n", Device.GetModeDescription( Device.ChosenMode ) );
+            _videoState.SafePrint( "Video mode {0} initialized.\n", Device.GetModeDescription( Device.ChosenMode ) );
 
             vid.recalc_refdef = true;
 
             if ( Device.Desc.Renderer.StartsWith( "PowerVR", StringComparison.InvariantCultureIgnoreCase ) )
-                Host.Screen.FullSbarDraw = true;
+                _videoState.FullSbarDraw = true;
 
             if ( Device.Desc.Renderer.StartsWith( "Permedia", StringComparison.InvariantCultureIgnoreCase ) )
-                Host.Screen.IsPermedia = true;
+                _videoState.IsPermedia = true;
 
             CheckTextureExtensions( );
 
             Directory.CreateDirectory( Path.Combine( FileSystem.GameDir, "glquake" ) );
         }
 
-        private void UpdateScreen()
-        {
-            Host.Screen.vid.maxwarpwidth = VideoDef.WARP_WIDTH;
-            Host.Screen.vid.maxwarpheight = VideoDef.WARP_HEIGHT;
-            Host.Screen.vid.colormap = Host.ColorMap;
-            var v = BitConverter.ToInt32( Host.ColorMap, 2048 );
-            Host.Screen.vid.fullbright = 256 - EndianHelper.LittleLong( v );
-        }
 
         private void UpdateConsole( System.Boolean isInitialStage = true )
         {
-            var vid = Host.Screen.vid;
+            var vid = _videoState.Data;
 
             if ( isInitialStage )
             {
@@ -248,7 +259,7 @@ namespace SharpQuake
         /// VID_Shutdown
         /// Called at shutdown
         /// </summary>
-        public void Shutdown()
+        public void Dispose()
         {
             Device.Dispose( );
             //_IsInitialized = false;
@@ -271,9 +282,9 @@ namespace SharpQuake
             var nummodes = Device.AvailableModes.Length;
 
             if( nummodes == 1 )
-                Host.Console.Print( "{0} video mode is available\n", nummodes );
+                _logger.Print( "{0} video mode is available\n", nummodes );
             else
-                Host.Console.Print( "{0} video modes are available\n", nummodes );
+                _logger.Print( "{0} video modes are available\n", nummodes );
         }
 
         /// <summary>
@@ -282,7 +293,7 @@ namespace SharpQuake
         /// <param name="msg"></param>
         private void DescribeCurrentMode_f( CommandMessage msg )
         {
-            Host.Console.Print( "{0}\n", GetModeDescription( Device.ChosenMode ) );
+            _logger.Print( "{0}\n", GetModeDescription( Device.ChosenMode ) );
         }
 
         /// <summary>
@@ -293,7 +304,7 @@ namespace SharpQuake
         {
             var modenum = MathLib.atoi( msg.Parameters[0] );
 
-            Host.Console.Print( "{0}\n", GetModeDescription( modenum ) );
+            _logger.Print( "{0}\n", GetModeDescription( modenum ) );
         }
 
         /// <summary>
@@ -302,9 +313,9 @@ namespace SharpQuake
         /// <param name="msg"></param>
         private void DescribeModes_f( CommandMessage msg )
         {
-            for( var i = 0; i < Device.AvailableModes.Length; i++ )
+            for ( var i = 0; i < Device.AvailableModes.Length; i++ )
             {
-                Host.Console.Print( "{0}:{1}\n", i, GetModeDescription( i ) );
+                _logger.Print( "{0}:{1}\n", i, GetModeDescription( i ) );
             }
         }
 
@@ -316,11 +327,11 @@ namespace SharpQuake
             // send an up event for each key, to make sure the server clears them all
             for( var i = 0; i < 256; i++ )
             {
-                Host.Keyboard.Event( i, false );
+                _keyboard.Event( i, false );
             }
 
-            Host.Keyboard.ClearStates();
-            MainWindow.Input.ClearStates();
+            _keyboard.ClearStates();
+            _mouse.ClearStates();
         }
 
         /// <summary>

@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,7 +22,10 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories;
+using SharpQuake.Framework.Factories.IO.WAD;
 using SharpQuake.Renderer.Textures;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements.Warnings
@@ -44,13 +47,20 @@ namespace SharpQuake.Rendering.UI.Elements.Warnings
             set;
         }
 
-        public LagWarning( Host host ) : base( host )
+        private readonly Scr _screen;
+        private readonly Vid _video;
+        private readonly WadFactory _wads;
+
+        public LagWarning( Scr screen, Vid video, WadFactory wads )
         {
+            _screen = screen;
+            _video = video;
+            _wads = wads;
         }
 
         public override void Initialise()
         {
-            Picture = BasePicture.FromWad( _host.Video.Device, _host.Wads.FromTexture( "turtle" ), "turtle", "GL_LINEAR" );
+            Picture = BasePicture.FromWad( _video.Device, _wads.FromTexture( "turtle" ), "turtle", "GL_LINEAR" );
 
             HasInitialised = true;
         }
@@ -65,10 +75,10 @@ namespace SharpQuake.Rendering.UI.Elements.Warnings
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            if ( !_host.Cvars.ShowTurtle.Get<Boolean>( ) )
+            if ( !Cvars.ShowTurtle.Get<Boolean>( ) )
                 return;
 
-            if ( _host.FrameTime < 0.1 )
+            if ( Time.Delta < 0.1 )
             {
                 TurtleCount = 0;
                 return;
@@ -78,7 +88,7 @@ namespace SharpQuake.Rendering.UI.Elements.Warnings
             if ( TurtleCount < 3 )
                 return;
 
-            _host.Video.Device.Graphics.DrawPicture( Picture, _host.Screen.VRect.x, _host.Screen.VRect.y );
+            _video.Device.Graphics.DrawPicture( Picture, _screen.VRect.x, _screen.VRect.y );
         }
     }
 }

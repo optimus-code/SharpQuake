@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,8 +23,10 @@
 /// </copyright>
 
 using System;
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Sys;
 
 namespace SharpQuake.Rendering.UI
 {
@@ -34,14 +36,17 @@ namespace SharpQuake.Rendering.UI
 
         private Int32 _Page;
 
-        public HelpMenu( MenuFactory menuFactory ) : base( "help", menuFactory )
+        private readonly PictureFactory _pictures;
+
+        public HelpMenu( IKeyboardInput keyboard, MenuFactory menus, PictureFactory pictures ) : base( "menu_help", keyboard, menus )
         {
+            _pictures = pictures;
         }
 
-        public override void Show( Host host )
+        public override void Show( )
         {
             _Page = 0;
-            base.Show( host );
+            base.Show( );
         }
 
         public override void KeyEvent( Int32 key )
@@ -49,19 +54,19 @@ namespace SharpQuake.Rendering.UI
             switch ( key )
             {
                 case KeysDef.K_ESCAPE:
-                    MenuFactory.Show( "menu_main" );
+                    _menus.Show( "menu_main" );
                     break;
 
                 case KeysDef.K_UPARROW:
                 case KeysDef.K_RIGHTARROW:
-                    Host.Menus.EnterSound = true;
+                    _menus.EnterSound = true;
                     if ( ++_Page >= NUM_HELP_PAGES )
                         _Page = 0;
                     break;
 
                 case KeysDef.K_DOWNARROW:
                 case KeysDef.K_LEFTARROW:
-                    Host.Menus.EnterSound = true;
+                    _menus.EnterSound = true;
                     if ( --_Page < 0 )
                         _Page = NUM_HELP_PAGES - 1;
                     break;
@@ -70,7 +75,11 @@ namespace SharpQuake.Rendering.UI
 
         public override void Draw( )
         {
-            Host.Menus.DrawPic( 0, 0, Host.Pictures.Cache( String.Format( "gfx/help{0}.lmp", _Page ), "GL_NEAREST" ) );
+            var scale = _menus.UIScale;
+            var adorner = _menus.BuildAdorner( 0, 0, 0, width: 152 );
+
+            var pic = _pictures.Cache( String.Format( "gfx/help{0}.lmp", _Page ), "GL_NEAREST" );
+            _menus.DrawPic( adorner.MidPointX - ( ( pic.Width * _menus.UIScale )  / 2 ), adorner.MidPointY - ( ( pic.Height * scale ) / 2 ), pic, scale );
         }
     }
 }

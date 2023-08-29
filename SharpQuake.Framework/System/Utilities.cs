@@ -317,5 +317,15 @@ namespace SharpQuake.Framework
                 a -= 360;
             return a;
         }
+
+        public static Int32 CalculateCrc32( Byte[] buffer )
+        {
+            Crc.Init( out var result );
+
+            for ( var i = 0; i < buffer.Length; i++ )
+                Crc.ProcessByte( ref result, buffer[i] );
+
+            return result;
+        }
     }
 }

@@ -72,6 +72,12 @@ namespace SharpQuake.Framework.IO
             }
         }
 
+        public client_t Client
+        {
+            get;
+            private set;
+        }
+
         public CommandMessage( String name, CommandSource source, params String[] parameters )
         {
             Name = name;
@@ -79,7 +85,7 @@ namespace SharpQuake.Framework.IO
             Source = source;
         }
 
-        public static CommandMessage FromString( String text, CommandSource source )
+        public static CommandMessage FromString( String text, CommandSource source, client_t client = null )
         {
             var argv = new List<String>( 80 );
             var argc = 0;
@@ -106,7 +112,12 @@ namespace SharpQuake.Framework.IO
                 return null;
 
             var vals = argc == 1 ? null : argv.GetRange( 1, argc - 1 ).ToArray( );
-            return new CommandMessage( argv[0], source, vals );
+            var result =  new CommandMessage( argv[0], source, vals );
+
+            if ( client != null )
+                result.Client = client;
+
+            return result;
         }
 
         public String ParametersFrom( Int32 index )

@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,14 +23,27 @@
 /// </copyright>
 
 using System;
+using System.Windows.Forms;
+using System.Xml.Linq;
+using SharpQuake.Desktop;
+using SharpQuake.Factories.Rendering;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Definitions;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Framework.Factories.IO.WAD;
 using SharpQuake.Framework.IO;
 using SharpQuake.Framework.IO.Input;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Game.Client;
+using SharpQuake.Logging;
+using SharpQuake.Networking.Client;
 using SharpQuake.Renderer;
+using SharpQuake.Rendering;
+using SharpQuake.Rendering.Cameras;
 using SharpQuake.Rendering.UI;
 using SharpQuake.Rendering.UI.Elements;
+using SharpQuake.Sys;
 
 // screen.h
 // gl_screen.c
@@ -42,13 +55,6 @@ namespace SharpQuake
     /// </summary>
     public partial class Scr
     {
-        public VidDef vid
-        {
-            get
-            {
-                return _VidDef;
-            }
-        }
         public VRect VRect
         {
             get
@@ -61,33 +67,19 @@ namespace SharpQuake
         {
             get
             {
-                return Host.Cvars.ViewSize;
+                return Cvars.ViewSize;
             }
         }
 
-
-        public Boolean CopyEverithing
-        {
-            get
-            {
-                return _CopyEverything;
-            }
-            set
-            {
-                _CopyEverything = value;
-            }
-        }
-
-        public Boolean IsDisabledForLoading;
         public Boolean BlockDrawing
         {
             get
             {
-                return Host.Video.Device.BlockDrawing;
+                return _video.Device.BlockDrawing;
             }
             set
             {
-                Host.Video.Device.BlockDrawing = value;
+                _video.Device.BlockDrawing = value;
             }
         }
 
@@ -95,22 +87,13 @@ namespace SharpQuake
         {
             get
             {
-                return Host.Video.Device.SkipUpdate;
+                return _video.Device.SkipUpdate;
             }
             set
             {
-                Host.Video.Device.SkipUpdate = value;
+                _video.Device.SkipUpdate = value;
             }
         }
-
-        // scr_skipupdate
-        public Boolean FullSbarDraw;
-
-        // fullsbardraw = false
-        public Boolean IsPermedia;
-
-        // only the refresh window will be updated unless these variables are flagged
-        public Boolean CopyTop;
 
         public Int32 ClearNotify;
         public Int32 glX;
@@ -118,7 +101,6 @@ namespace SharpQuake
         public Int32 glWidth;
         public Int32 glHeight;
         public Int32 FullUpdate;
-        private VidDef _VidDef = new VidDef( );	// viddef_t vid (global video state)
         private VRect _VRect; // scr_vrect
 
         private Double _DisabledTime; // float scr_disabled_time
@@ -127,7 +109,6 @@ namespace SharpQuake
         private Boolean _IsInitialized;
 
         private Boolean _InUpdate;
-        private Boolean _CopyEverything;
 
         private Single _OldScreenSize; // float oldscreensize
         private Single _OldFov; // float oldfov
@@ -135,7 +116,8 @@ namespace SharpQuake
         private Boolean _IsMouseWindowed; // windowed_mouse (don't confuse with _windowed_mouse cvar)
                                           // scr_fullupdate    set to 0 to force full redraw
                                           // CHANGE
-        private Host Host
+
+        public Action OnDrawMenus
         {
             get;
             set;
@@ -153,41 +135,81 @@ namespace SharpQuake
             private set;
         }
 
-        public Scr( Host host )
+        private readonly IConsoleLogger _logger;
+        private readonly CommandFactory _commands;
+        private readonly ClientVariableFactory _cvars;
+        private readonly WadFactory _wads;
+        private readonly IKeyboardInput _keyboard;
+        private readonly IMouseInput _mouse;
+        private readonly MainWindow _window;
+        private readonly snd _sound;
+        private readonly ClientState _clientState;
+        private readonly IGameRenderer _gameRenderer;
+        private readonly Vid _video;
+        private readonly Drawer _drawer;
+        private readonly VideoState _videoState;
+        private readonly ElementFactory _elements;
+        private readonly RenderState _renderState;
+        private IGameConsoleLogger _gameLogger;
+
+        // TODO - Refactor, DI has highlighted spaghetti madness
+        public Scr( IConsoleLogger logger, CommandFactory commands, ClientVariableFactory cvars, WadFactory wads,
+            IKeyboardInput keyboard, IMouseInput mouse, MainWindow window, snd sound, ClientState clientState,
+            IGameRenderer gameRenderer, Vid video, Drawer drawer, VideoState videoState,
+            ElementFactory elements, RenderState renderState )
         {
-            Host = host;
-            HudResources = new HudResources( host );
-            Elements = new ElementFactory( host );
+            _logger = logger;
+            _commands = commands;
+            _cvars = cvars;
+            _wads = wads;
+            _keyboard = keyboard;
+            _mouse = mouse;
+            _window = window;
+            _sound = sound;
+            _clientState = clientState;
+            _gameRenderer = gameRenderer;
+            _video = video;
+            _drawer = drawer;
+            _videoState = videoState;
+            _elements = elements;
+            _renderState = renderState;
+            _renderState.OnTimeRefresh += EndRendering;
+
+            HudResources = new HudResources( _video, this, _drawer, _wads, _clientState, _videoState );
+            Elements = _elements; // TODO - REFACTOR
         }
 
         // SCR_Init
         public void Initialise( )
         {
-            if ( Host.Cvars.ViewSize == null )
+            if ( Cvars.ViewSize == null )
             {
-                Host.Cvars.ViewSize = Host.CVars.Add( "viewsize", 100f, ClientVariableFlags.Archive );
-                Host.Cvars.Fov = Host.CVars.Add( "fov", 90f, ClientVariableFlags.Archive );	// 10 - 170
-                Host.Cvars.ConSpeed = Host.CVars.Add( "scr_conspeed", 3000 );
-                Host.Cvars.CenterTime = Host.CVars.Add( "scr_centertime", 2 );
-                Host.Cvars.ShowRam = Host.CVars.Add( "showram", true );
-                Host.Cvars.ShowTurtle = Host.CVars.Add( "showturtle", false );
-                Host.Cvars.ShowPause = Host.CVars.Add( "showpause", true );
-                Host.Cvars.PrintSpeed = Host.CVars.Add( "scr_printspeed", 8 );
-                Host.Cvars.glTripleBuffer = Host.CVars.Add( "gl_triplebuffer", 1, ClientVariableFlags.Archive );
+                Cvars.ViewSize = _cvars.Add( "viewsize", 100f, ClientVariableFlags.Archive );
+                Cvars.Fov = _cvars.Add( "fov", 90f, ClientVariableFlags.Archive );	// 10 - 170
+                Cvars.ConSpeed = _cvars.Add( "scr_conspeed", 3000 );
+                Cvars.CenterTime = _cvars.Add( "scr_centertime", 2 );
+                Cvars.ShowRam = _cvars.Add( "showram", true );
+                Cvars.ShowTurtle = _cvars.Add( "showturtle", false );
+                Cvars.ShowPause = _cvars.Add( "showpause", true );
+                Cvars.PrintSpeed = _cvars.Add( "scr_printspeed", 8 );
+                Cvars.glTripleBuffer = _cvars.Add( "gl_triplebuffer", 1, ClientVariableFlags.Archive );
+                Cvars.ShowFPS = _cvars.Add( "r_showFPS", false );
             }
 
             //
             // register our commands
             //
-            Host.Commands.Add( "screenshot", ScreenShot_f );
-            Host.Commands.Add( "sizeup", SizeUp_f );
-            Host.Commands.Add( "sizedown", SizeDown_f );
+            _commands.Add( "screenshot", ScreenShot_f );
+            _commands.Add( "sizeup", SizeUp_f );
+            _commands.Add( "sizedown", SizeDown_f );
 
             HudResources.Initialise( );
             Elements.Initialise( );
 
             if ( CommandLine.HasParam( "-fullsbar" ) )
-                FullSbarDraw = true;
+                _videoState.FullSbarDraw = true;
+
+            UpdateScreenData( );
 
             _IsInitialized = true;
         }
@@ -217,29 +239,31 @@ namespace SharpQuake
             _InUpdate = true;
             try
             {
-                if ( MainWindow.Instance != null && !MainWindow.Instance.IsDisposing )
+                if ( _window?.IsDisposing == true )
                 {
-                    if ( ( MainWindow.Instance.VSync == VSyncMode.One ) != Host.Video.Wait )
-                        MainWindow.Instance.VSync = ( Host.Video.Wait ? VSyncMode.One : VSyncMode.None );
+                    if ( ( _window.VSync == VSyncMode.One ) != _video.Wait )
+                        _window.VSync = ( _video.Wait ? VSyncMode.One : VSyncMode.None );
                 }
 
-                _VidDef.numpages = 2 + ( Int32 ) Host.Cvars.glTripleBuffer.Get<Int32>( );
+                _videoState.Data.numpages = 2 + ( Int32 ) Cvars.glTripleBuffer.Get<Int32>( );
 
-                CopyTop = false;
-                _CopyEverything = false;
+                _videoState.ScreenCopyTop = false;
+                _videoState.ScreenCopyEverything = false;
 
-                if ( IsDisabledForLoading )
+                if ( _videoState.IsScreenDisabledForLoading )
                 {
-                    if ( ( Host.RealTime - _DisabledTime ) > 60 )
+                    if ( ( Time.Absolute - _DisabledTime ) > 60 )
                     {
-                        IsDisabledForLoading = false;
-                        Host.Console.Print( "Load failed.\n" );
+                        _videoState.IsScreenDisabledForLoading = false;
+                        _logger.Print( "Load failed.\n" );
                     }
                     else
                         return;
                 }
 
-                if ( !Host.Console.IsInitialized )
+                _gameLogger = Elements.Get<VisualConsole>( ElementFactory.CONSOLE );
+
+                if ( _gameLogger == null || !_gameLogger.IsInitialised )
                     return;	// not initialized yet
 
                 BeginRendering( );
@@ -247,19 +271,19 @@ namespace SharpQuake
                 //
                 // determine size of refresh window
                 //
-                if ( _OldFov != Host.Cvars.Fov.Get<Single>( ) )
+                if ( _OldFov != Cvars.Fov.Get<Single>( ) )
                 {
-                    _OldFov = Host.Cvars.Fov.Get<Single>( );
-                    _VidDef.recalc_refdef = true;
+                    _OldFov = Cvars.Fov.Get<Single>( );
+                    _videoState.Data.recalc_refdef = true;
                 }
 
-                if ( _OldScreenSize != Host.Cvars.ViewSize.Get<Single>( ) )
+                if ( _OldScreenSize != Cvars.ViewSize.Get<Single>( ) )
                 {
-                    _OldScreenSize = Host.Cvars.ViewSize.Get<Single>( );
-                    _VidDef.recalc_refdef = true;
+                    _OldScreenSize = Cvars.ViewSize.Get<Single>( );
+                    _videoState.Data.recalc_refdef = true;
                 }
 
-                if ( _VidDef.recalc_refdef )
+                if ( _videoState.Data.recalc_refdef )
                     CalcRefdef( );
 
                 //
@@ -267,27 +291,36 @@ namespace SharpQuake
                 //
                 Elements.Get<VisualConsole>( ElementFactory.CONSOLE )?.Configure( );
 
-                Host.View.RenderView( );
+                _renderState.OnRender?.Invoke( );
 
-                Host.Video.Device.Begin2DScene( );
+                _video.Device.Begin2DScene( );
                 //Set2D();
 
                 //
                 // draw any areas not covered by the refresh
                 //
-                Host.Screen.TileClear( );
+                TileClear( );
 
                 DrawElements( );
 
-                Host.Video.Device.End2DScene( );
+                _video.Device.End2DScene( );
 
-                Host.View.UpdatePalette( );
+                _renderState.OnUpdatePalette?.Invoke( );
                 EndRendering( );
             }
             finally
             {
                 _InUpdate = false;
             }
+        }
+
+        private void UpdateScreenData( )
+        {
+            _videoState.Data.maxwarpwidth = VideoDef.WARP_WIDTH;
+            _videoState.Data.maxwarpheight = VideoDef.WARP_HEIGHT;
+            _videoState.Data.colormap = _gameRenderer.ColorMap;
+            var v = BitConverter.ToInt32( _gameRenderer.ColorMap, 2048 );
+            _videoState.Data.fullbright = 256 - EndianHelper.LittleLong( v );
         }
 
         /// <summary>
@@ -298,23 +331,23 @@ namespace SharpQuake
             if ( Elements.IsVisible( ElementFactory.MODAL ) )
             {
                 Elements.Draw( ElementFactory.HUD );
-                Host.DrawingContext.FadeScreen( );
+                _drawer.FadeScreen( );
                 Elements.Draw( ElementFactory.MODAL );
-                _CopyEverything = true;
+                _videoState.ScreenCopyEverything = true;
             }
             else if ( Elements.IsVisible( ElementFactory.LOADING ) )
             {
                 Elements.Draw( ElementFactory.LOADING );
                 Elements.Draw( ElementFactory.HUD );
             }
-            else if ( Host.Client.cl.intermission == 1 && Host.Keyboard.Destination == KeyDestination.key_game )
+            else if ( _clientState.Data.intermission == 1 && _keyboard.Destination == KeyDestination.key_game )
             {
-                if ( Host.Client.cl.gametype == ProtocolDef.GAME_DEATHMATCH )
+                if ( _clientState.Data.gametype == ProtocolDef.GAME_DEATHMATCH )
                     Elements.Draw( ElementFactory.MP_SCOREBOARD );
                 else
                     Elements.Draw( ElementFactory.INTERMISSION );
             }
-            else if ( Host.Client.cl.intermission == 2 && Host.Keyboard.Destination == KeyDestination.key_game )
+            else if ( _clientState.Data.intermission == 2 && _keyboard.Destination == KeyDestination.key_game )
             {
                 Elements.Draw( ElementFactory.FINALE );
                 Elements.Draw( ElementFactory.CENTRE_PRINT );
@@ -329,10 +362,10 @@ namespace SharpQuake
                 Elements.Draw( ElementFactory.CENTRE_PRINT );
                 Elements.Draw( ElementFactory.HUD );
                 Elements.Draw( ElementFactory.CONSOLE );
-                Host.Menus.Draw( );
+                OnDrawMenus?.Invoke( );
             }
 
-            if ( Host.ShowFPS )
+            if ( Cvars.ShowFPS.Get<Boolean>() )
                 Elements.Draw( ElementFactory.FPS );
         }
 
@@ -341,45 +374,45 @@ namespace SharpQuake
         /// </summary>
         public void EndRendering( )
         {
-            if ( MainWindow.Instance == null || MainWindow.Instance.IsDisposing )
+            if ( _window == null || _window.IsDisposing )
                 return;
 
-            var form = MainWindow.Instance;
+            var form = _window;
             if ( form == null )
                 return;
 
-            Host.Video?.Device?.EndScene( );
+            _video?.Device?.EndScene( );
 
             //if( !SkipUpdate || BlockDrawing )
             //    form.SwapBuffers();
 
             // handle the mouse state
-            if ( !Host.Video.WindowedMouse )
+            if ( !_video.WindowedMouse )
             {
                 if ( _IsMouseWindowed )
                 {
-                    MainWindow.Input.DeactivateMouse( );
-                    MainWindow.Input.ShowMouse( );
+                    _mouse.DeactivateMouse( );
+                    _mouse.ShowMouse( );
                     _IsMouseWindowed = false;
                 }
             }
             else
             {
                 _IsMouseWindowed = true;
-                if ( Host.Keyboard.Destination == KeyDestination.key_game && !MainWindow.Input.IsMouseActive &&
-                    Host.Client.cls.state != cactive_t.ca_disconnected )// && ActiveApp)
+                if ( _keyboard.Destination == KeyDestination.key_game && !_mouse.IsActive &&
+                    _clientState.StaticData.state != cactive_t.ca_disconnected )// && ActiveApp)
                 {
-                    MainWindow.Input.ActivateMouse( );
-                    MainWindow.Input.HideMouse( );
+                    _mouse.ActivateMouse( );
+                    _mouse.HideMouse( );
                 }
-                else if ( MainWindow.Input.IsMouseActive && Host.Keyboard.Destination != KeyDestination.key_game )
+                else if ( _mouse.IsActive && _keyboard.Destination != KeyDestination.key_game )
                 {
-                    MainWindow.Input.DeactivateMouse( );
-                    MainWindow.Input.ShowMouse( );
+                    _mouse.DeactivateMouse( );
+                    _mouse.ShowMouse( );
                 }
             }
 
-            if ( FullSbarDraw )
+            if ( _videoState.FullSbarDraw )
                 Elements.SetDirty( ElementFactory.HUD );
         }
 
@@ -388,9 +421,9 @@ namespace SharpQuake
         /// </summary>
         public void EndLoadingPlaque( )
         {
-            Host.Screen.IsDisabledForLoading = false;
-            Host.Screen.FullUpdate = 0;
-            Host.Console.ClearNotify( );
+            _videoState.IsScreenDisabledForLoading = false;
+            FullUpdate = 0;
+            _gameLogger.ClearNotify( );
         }
 
         /// <summary>
@@ -398,26 +431,26 @@ namespace SharpQuake
         /// </summary>
         public void BeginLoadingPlaque( )
         {
-            Host.Sound.StopAllSounds( true );
+            _sound.StopAllSounds( true );
 
-            if ( Host.Client.cls.state != cactive_t.ca_connected ||
-                Host.Client.cls.signon != ClientDef.SIGNONS )
+            if ( _clientState.StaticData.state != cactive_t.ca_connected ||
+                _clientState.StaticData.signon != ClientDef.SIGNONS )
                 return;
 
             // redraw with no console and the loading plaque
-            Host.Console.ClearNotify( );
-            Host.Screen.Elements.Reset( ElementFactory.CENTRE_PRINT );
-            Host.Screen.Elements.Reset( ElementFactory.CONSOLE );
+            _gameLogger.ClearNotify( );
+            Elements.Reset( ElementFactory.CENTRE_PRINT );
+            Elements.Reset( ElementFactory.CONSOLE );
 
             Elements.Show( ElementFactory.LOADING );
-            Host.Screen.FullUpdate = 0;
+            FullUpdate = 0;
             Elements.SetDirty( ElementFactory.HUD );
             UpdateScreen( );
             Elements.Hide( ElementFactory.LOADING );
 
-            Host.Screen.IsDisabledForLoading = true;
-            _DisabledTime = Host.RealTime;
-            Host.Screen.FullUpdate = 0;
+            _videoState.IsScreenDisabledForLoading = true;
+            _DisabledTime = Time.Absolute;
+            FullUpdate = 0;
         }
 
         /// <summary>
@@ -426,30 +459,30 @@ namespace SharpQuake
         /// </summary>
         public Boolean ModalMessage( String text )
         {
-            if ( Host.Client.cls.state == cactive_t.ca_dedicated )
+            if ( _clientState.StaticData.state == cactive_t.ca_dedicated )
                 return true;
 
             Elements.Enqueue( ElementFactory.MODAL, text );
 
             // draw a fresh screen
-            Host.Screen.FullUpdate = 0;
+            FullUpdate = 0;
 
             Elements.Show( ElementFactory.MODAL );
             UpdateScreen( );
             Elements.Hide( ElementFactory.MODAL );
 
-            Host.Sound.ClearBuffer( );		// so dma doesn't loop current sound
+            _sound.ClearBuffer( );		// so dma doesn't loop current sound
 
             do
             {
-                Host.Keyboard.KeyCount = -1;        // wait for a key down and up
-				Host.MainWindow.SendKeyEvents( );
-            } while ( Host.Keyboard.LastPress != 'y' && Host.Keyboard.LastPress != 'n' && Host.Keyboard.LastPress != KeysDef.K_ESCAPE );
+                _keyboard.KeyCount = -1;        // wait for a key down and up
+                SendKeyEvents( );
+            } while ( _keyboard.LastPress != 'y' && _keyboard.LastPress != 'n' && _keyboard.LastPress != KeysDef.K_ESCAPE );
 
-            Host.Screen.FullUpdate = 0;
+            FullUpdate = 0;
             UpdateScreen( );
 
-            return ( Host.Keyboard.LastPress == 'y' );
+            return ( _keyboard.LastPress == 'y' );
         }
 
         // SCR_SizeUp_f
@@ -457,8 +490,8 @@ namespace SharpQuake
         // Keybinding command
         private void SizeUp_f( CommandMessage msg )
         {
-            Host.CVars.Set( "viewsize", Host.Cvars.ViewSize.Get<Single>( ) + 10 );
-            _VidDef.recalc_refdef = true;
+            _cvars.Set( "viewsize", Cvars.ViewSize.Get<Single>( ) + 10 );
+            _videoState.Data.recalc_refdef = true;
         }
 
         // SCR_SizeDown_f
@@ -466,8 +499,8 @@ namespace SharpQuake
         // Keybinding command
         private void SizeDown_f( CommandMessage msg )
         {
-            Host.CVars.Set( "viewsize", Host.Cvars.ViewSize.Get<Single>( ) - 10 );
-            _VidDef.recalc_refdef = true;
+            _cvars.Set( "viewsize", Cvars.ViewSize.Get<Single>( ) - 10 );
+            _videoState.Data.recalc_refdef = true;
         }
 
         /// <summary>
@@ -476,8 +509,8 @@ namespace SharpQuake
         /// <param name="msg"></param>
         private void ScreenShot_f( CommandMessage msg )
         {
-            Host.Video.Device.ScreenShot( out var path );
-            Host.Console.Print( $"Screenshot saved '{path}'.\n" );
+            _video.Device.ScreenShot( out var path );
+            _logger.Print( $"Screenshot saved '{path}'.\n" );
         }
 
         /// <summary>
@@ -485,7 +518,7 @@ namespace SharpQuake
         /// </summary>
         private void BeginRendering( )
         {
-            if ( MainWindow.Instance == null || MainWindow.Instance.IsDisposing )
+            if ( _window == null || _window.IsDisposing )
                 return;
 
             glX = 0;
@@ -493,7 +526,7 @@ namespace SharpQuake
             glWidth = 0;
             glHeight = 0;
 
-            var window = MainWindow.Instance;
+            var window = _window;
             if ( window != null )
             {
                 var size = window.ClientSize;
@@ -501,7 +534,7 @@ namespace SharpQuake
                 glHeight = size.Height;
             }
 
-            Host.Video?.Device?.BeginScene( );
+            _video?.Device?.BeginScene( );
         }
 
         // SCR_CalcRefdef
@@ -510,77 +543,89 @@ namespace SharpQuake
         // Internal use only
         private void CalcRefdef( )
         {
-            Host.Screen.FullUpdate = 0; // force a background redraw
-            _VidDef.recalc_refdef = false;
+            FullUpdate = 0; // force a background redraw
+            _videoState.Data.recalc_refdef = false;
 
             // force the status bar to redraw
             Elements.SetDirty( ElementFactory.HUD );
 
             // bound viewsize
-            if ( Host.Cvars.ViewSize.Get<Single>( ) < 30 )
-                Host.CVars.Set( "viewsize", 30f );
-            if ( Host.Cvars.ViewSize.Get<Single>( ) > 120 )
-                Host.CVars.Set( "viewsize", 120f );
+            if ( Cvars.ViewSize.Get<Single>( ) < 30 )
+                _cvars.Set( "viewsize", 30f );
+            if ( Cvars.ViewSize.Get<Single>( ) > 120 )
+                _cvars.Set( "viewsize", 120f );
 
             // bound field of view
-            if ( Host.Cvars.Fov.Get<Single>( ) < 10 )
-                Host.CVars.Set( "fov", 10f );
-            if ( Host.Cvars.Fov.Get<Single>( ) > 170 )
-                Host.CVars.Set( "fov", 170f );
+            if ( Cvars.Fov.Get<Single>( ) < 10 )
+                _cvars.Set( "fov", 10f );
+            if ( Cvars.Fov.Get<Single>( ) > 170 )
+                _cvars.Set( "fov", 170f );
 
             // intermission is always full screen
             Single size;
-            if ( Host.Client.cl.intermission > 0 )
-                size = 120;
-            else
-                size = Host.Cvars.ViewSize.Get<Single>( );
-
-            if ( size >= 120 )
-                HudResources.Lines = 0; // no status bar at all
-            else if ( size >= 110 )
-                HudResources.Lines = 24; // no inventory
-            else
-                HudResources.Lines = 24 + 16 + 8;
 
             var full = false;
-            if ( Host.Cvars.ViewSize.Get<Single>( ) >= 100.0 )
+
+            if ( Cvars.NewUI?.Get<Boolean>( ) == true )
             {
+                HudResources.Lines = 0;
+                size = 120;
                 full = true;
-                size = 100.0f;
             }
             else
-                size = Host.Cvars.ViewSize.Get<Single>( );
-
-            if ( Host.Client.cl.intermission > 0 )
             {
-                full = true;
-                size = 100;
-                HudResources.Lines = 0;
+                if ( _clientState.Data.intermission > 0 )
+                    size = 120;
+                else
+                    size = Cvars.ViewSize.Get<Single>( );
+
+                if ( size >= 120 )
+                    HudResources.Lines = 0; // no status bar at all
+                else if ( size >= 110 )
+                    HudResources.Lines = 24; // no inventory
+                else
+                    HudResources.Lines = 24 + 16 + 8;
+            
+
+                if ( Cvars.ViewSize.Get<Single>( ) >= 100.0 )
+                {
+                    full = true;
+                    size = 100.0f;
+                }
+                else
+                    size = Cvars.ViewSize.Get<Single>( );
+
+                if ( _clientState.Data.intermission > 0 )
+                {
+                    full = true;
+                    size = 100;
+                    HudResources.Lines = 0;
+                }
             }
             size /= 100.0f;
 
-            var h = _VidDef.height - HudResources.Lines;
+            var h = _videoState.Data.height - HudResources.Lines;
 
-            var rdef = Host.RenderContext.RefDef;
-            rdef.vrect.width = ( Int32 ) ( _VidDef.width * size );
+            var rdef = _renderState.Data;
+            rdef.vrect.width = ( Int32 ) ( _videoState.Data.width * size );
             if ( rdef.vrect.width < 96 )
             {
                 size = 96.0f / rdef.vrect.width;
                 rdef.vrect.width = 96;  // min for icons
             }
 
-            rdef.vrect.height = ( Int32 ) ( _VidDef.height * size );
-            if ( rdef.vrect.height > _VidDef.height - HudResources.Lines )
-                rdef.vrect.height = _VidDef.height - HudResources.Lines;
-            if ( rdef.vrect.height > _VidDef.height )
-                rdef.vrect.height = _VidDef.height;
-            rdef.vrect.x = ( _VidDef.width - rdef.vrect.width ) / 2;
+            rdef.vrect.height = ( Int32 ) ( _videoState.Data.height * size );
+            if ( rdef.vrect.height > _videoState.Data.height - HudResources.Lines )
+                rdef.vrect.height = _videoState.Data.height - HudResources.Lines;
+            if ( rdef.vrect.height > _videoState.Data.height )
+                rdef.vrect.height = _videoState.Data.height;
+            rdef.vrect.x = ( _videoState.Data.width - rdef.vrect.width ) / 2;
             if ( full )
                 rdef.vrect.y = 0;
             else
                 rdef.vrect.y = ( h - rdef.vrect.height ) / 2;
 
-            rdef.fov_x = Host.Cvars.Fov.Get<Single>( );
+            rdef.fov_x = Cvars.Fov.Get<Single>( );
             rdef.fov_y = Utilities.CalculateFOV( rdef.fov_x, rdef.vrect.width, rdef.vrect.height );
 
             _VRect = rdef.vrect;
@@ -590,24 +635,43 @@ namespace SharpQuake
         // SCR_TileClear
         private void TileClear( )
         {
-            var rdef = Host.RenderContext.RefDef;
+            var rdef = _renderState.Data;
             if ( rdef.vrect.x > 0 )
             {
                 // left
-                Host.DrawingContext.TileClear( 0, 0, rdef.vrect.x, _VidDef.height - HudResources.Lines );
+                _drawer.TileClear( 0, 0, rdef.vrect.x, _videoState.Data.height - HudResources.Lines );
                 // right
-                Host.DrawingContext.TileClear( rdef.vrect.x + rdef.vrect.width, 0,
-                    _VidDef.width - rdef.vrect.x + rdef.vrect.width,
-                    _VidDef.height - HudResources.Lines );
+                _drawer.TileClear( rdef.vrect.x + rdef.vrect.width, 0,
+                    _videoState.Data.width - rdef.vrect.x + rdef.vrect.width,
+                    _videoState.Data.height - HudResources.Lines );
             }
             if ( rdef.vrect.y > 0 )
             {
                 // top
-                Host.DrawingContext.TileClear( rdef.vrect.x, 0, rdef.vrect.x + rdef.vrect.width, rdef.vrect.y );
+                _drawer.TileClear( rdef.vrect.x, 0, rdef.vrect.x + rdef.vrect.width, rdef.vrect.y );
                 // bottom
-                Host.DrawingContext.TileClear( rdef.vrect.x, rdef.vrect.y + rdef.vrect.height,
-                    rdef.vrect.width, _VidDef.height - HudResources.Lines - ( rdef.vrect.height + rdef.vrect.y ) );
+                _drawer.TileClear( rdef.vrect.x, rdef.vrect.y + rdef.vrect.height,
+                    rdef.vrect.width, _videoState.Data.height - HudResources.Lines - ( rdef.vrect.height + rdef.vrect.y ) );
             }
+        }
+
+        /// <summary>
+        /// SafePrint redirect to remove circular dependencies
+        /// </summary>
+        /// <param name="fmt"></param>
+        /// <param name="args"></param>
+        public void SafePrint( String fmt, params Object[] args )
+        {
+            _gameLogger.SafePrint( fmt, args );
+        }
+
+        /// <summary>
+        /// Sys_SendKeyEventsa
+        /// </summary>
+        public void SendKeyEvents( )
+        {
+            SkipUpdate = false;
+            _window.ProcessEvents( );
         }
     }
 }

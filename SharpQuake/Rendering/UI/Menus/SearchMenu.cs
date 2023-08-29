@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,7 +22,9 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI
@@ -32,17 +34,23 @@ namespace SharpQuake.Rendering.UI
         private Boolean _SearchComplete;
         private Double _SearchCompleteTime;
 
-        public SearchMenu( MenuFactory menuFactory ) : base( "menu_search", menuFactory )
+        private readonly Network _network;
+        private readonly PictureFactory _pictures;
+
+        public SearchMenu( IKeyboardInput keyboard, MenuFactory menus, Network network,
+            PictureFactory pictures ) : base( "menu_search", keyboard, menus )
         {
+            _network = network;
+            _pictures = pictures;
         }
 
-        public override void Show( Host host )
+        public override void Show( )
         {
-            base.Show( host );
-            Host.Network.SlistSilent = true;
-            Host.Network.SlistLocal = false;
+            base.Show( );
+            _network.SlistSilent = true;
+            _network.SlistLocal = false;
             _SearchComplete = false;
-            Host.Network.Slist_f( null );
+            _network.Slist_f( null );
         }
 
         public override void KeyEvent( Int32 key )
@@ -52,35 +60,35 @@ namespace SharpQuake.Rendering.UI
 
         public override void Draw( )
         {
-            var p = Host.Pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
-            Host.Menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
+            var p = _pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
+            _menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
             var x = ( 320 / 2 ) - ( ( 12 * 8 ) / 2 ) + 4;
-            Host.Menus.DrawTextBox( x - 8, 32, 12, 1 );
-            Host.Menus.Print( x, 40, "Searching..." );
+            _menus.DrawTextBox( x - 8, 32, 12, 1 );
+            _menus.Print( x, 40, "Searching..." );
 
-            if ( Host.Network.SlistInProgress )
+            if ( _network.SlistInProgress )
             {
-                Host.Network.Poll( );
+                _network.Poll( );
                 return;
             }
 
             if ( !_SearchComplete )
             {
                 _SearchComplete = true;
-                _SearchCompleteTime = Host.RealTime;
+                _SearchCompleteTime = Time.Absolute;
             }
 
-            if ( Host.Network.HostCacheCount > 0 )
+            if ( _network.HostCacheCount > 0 )
             {
-                MenuFactory.Show( "menu_server_list" );
+                _menus.Show( "menu_server_list" );
                 return;
             }
 
-            Host.Menus.PrintWhite( ( 320 / 2 ) - ( ( 22 * 8 ) / 2 ), 64, "No Quake servers found" );
-            if ( ( Host.RealTime - _SearchCompleteTime ) < 3.0 )
+            _menus.PrintWhite( ( 320 / 2 ) - ( ( 22 * 8 ) / 2 ), 64, "No Quake servers found" );
+            if ( ( Time.Absolute - _SearchCompleteTime ) < 3.0 )
                 return;
 
-            MenuFactory.Show( "menu_lan_config" );
+            _menus.Show( "menu_lan_config" );
         }
     }
 }

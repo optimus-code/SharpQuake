@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,6 +23,7 @@
 /// </copyright>
 
 using SharpQuake.Framework.Rendering.UI;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements
@@ -79,18 +80,12 @@ namespace SharpQuake.Rendering.UI.Elements
             }
         }
 
-        protected readonly Host _host;
-
-        public BaseUIElement( Host host )
-        {
-            _host = host;
-        }
-
         /// <summary>
         /// Initialise any textures, resources etc.
         /// </summary>
         public virtual void Initialise( )
         {
+            HasInitialised = true;
         }
 
         /// <summary>

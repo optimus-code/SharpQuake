@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -25,6 +25,7 @@
 using System;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.Sound;
+using SharpQuake.Sys;
 
 namespace SharpQuake
 {
@@ -170,7 +171,7 @@ namespace SharpQuake
             var out_mask = _shm.samples - 1;
             var out_idx = 0; //_PaintedTime * _shm.channels & out_mask;
             var step = 3 - _shm.channels;
-            var snd_vol = ( Int32 ) ( Host.Cvars.Volume.Get<Single>( ) * 256 );
+            var snd_vol = ( Int32 ) ( Cvars.Volume.Get<Single>( ) * 256 );
             var buffer = _Controller.LockBuffer();
             var uval = Union4b.Empty;
             Int32 val, srcIndex = 0;
@@ -239,7 +240,7 @@ namespace SharpQuake
         // S_TransferStereo16
         private void TransferStereo16( Int32 endtime )
         {
-            var snd_vol = ( Int32 ) ( Host.Cvars.Volume.Get<Single>( ) * 256 );
+            var snd_vol = ( Int32 ) ( Cvars.Volume.Get<Single>( ) * 256 );
             var lpaintedtime = _PaintedTime;
             var buffer = _Controller.LockBuffer();
             var srcOffset = 0;

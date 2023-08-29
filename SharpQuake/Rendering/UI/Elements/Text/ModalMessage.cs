@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -24,6 +24,7 @@
 
 using SharpQuake.Framework.IO.Input;
 using SharpQuake.Framework.Rendering.UI;
+using SharpQuake.Sys;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -44,9 +45,13 @@ namespace SharpQuake.Rendering.UI.Elements.Text
             set;
         }
 
-        public ModalMessage( Host host ) : base( host )
+        private readonly VideoState _videoState;
+        private readonly Drawer _drawer;
+
+        public ModalMessage( VideoState videoState, Drawer drawer )
         {
-            HasInitialised = true;
+            _videoState = videoState;
+            _drawer = drawer;
         }
 
         public void Enqueue( String text )
@@ -73,7 +78,7 @@ namespace SharpQuake.Rendering.UI.Elements.Text
                 return;
 
             var offset = 0;
-            var y = ( Int32 ) ( _host.Screen.vid.height * 0.35 );
+            var y = ( Int32 ) ( _videoState.Data.height * 0.35 );
 
             do
             {
@@ -86,9 +91,9 @@ namespace SharpQuake.Rendering.UI.Elements.Text
                 var length = end - offset;
                 if ( length > 0 )
                 {
-                    var x = ( _host.Screen.vid.width - length * 8 ) / 2;
+                    var x = ( _videoState.Data.width - length * 8 ) / 2;
                     for ( var j = 0; j < length; j++, x += 8 )
-                        _host.DrawingContext.DrawCharacter( x, y, Message[offset + j] );
+                        _drawer.DrawCharacter( x, y, Message[offset + j] );
 
                     y += 8;
                 }

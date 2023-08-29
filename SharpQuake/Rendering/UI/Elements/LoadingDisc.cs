@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,7 +22,10 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories;
+using SharpQuake.Framework.Factories.IO.WAD;
 using SharpQuake.Renderer.Textures;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements
@@ -35,15 +38,22 @@ namespace SharpQuake.Rendering.UI.Elements
             private set;
         }
 
-        public LoadingDisc( Host host ) : base( host )
+        private readonly Vid _video;
+        private readonly VideoState _videoState;
+        private readonly WadFactory _wads;
+
+        public LoadingDisc( Vid video, VideoState videoState, WadFactory wads )
         {
+            _video = video;
+            _videoState = videoState;
+            _wads = wads;
         }
 
         public override void Initialise( )
         {
             base.Initialise( );
 
-            Disc = BasePicture.FromWad( _host.Video.Device, _host.Wads.FromTexture( "disc" ), "disc", "GL_NEAREST" );
+            Disc = BasePicture.FromWad( _video.Device, _wads.FromTexture( "disc" ), "disc", "GL_NEAREST" );
 
             HasInitialised = true;
         }
@@ -64,9 +74,9 @@ namespace SharpQuake.Rendering.UI.Elements
 
             if ( Disc != null )
             {
-                _host.Video.Device.SetDrawBuffer( true );
-                _host.Video.Device.Graphics.DrawPicture( Disc, _host.Screen.vid.width - 24, 0 );
-                _host.Video.Device.SetDrawBuffer( false );
+                _video.Device.SetDrawBuffer( true );
+                _video.Device.Graphics.DrawPicture( Disc, _videoState.Data.width - 24, 0 );
+                _video.Device.SetDrawBuffer( false );
             }
         }
     }

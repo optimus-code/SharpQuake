@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,29 +22,40 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
-using SharpQuake.Framework.IO;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Rendering.UI.Menus;
+using SharpQuake.Services;
+using SharpQuake.Sys;
 using System;
-using System.IO;
-using System.Text;
 
 namespace SharpQuake.Rendering.UI
 {
 	public class LoadMenu : BaseMenu
 	{
-		public const Int32 MAX_SAVEGAMES = 12;
-		protected String[] _FileNames; //[MAX_SAVEGAMES]; // filenames
-		protected Boolean[] _Loadable; //[MAX_SAVEGAMES]; // loadable
+        private readonly PictureFactory _pictures;
+        private readonly CommandFactory _commands;
+        private readonly Scr _screen;
+        private readonly snd _sound;
+		private readonly SaveFileService _saves;
 
-		public LoadMenu( String name, MenuFactory menuFactory ) : base( name, menuFactory )
-		{
-		}
+        public LoadMenu( IKeyboardInput keyboard, MenuFactory menus, PictureFactory pictures, CommandFactory commands,
+			Scr screen, snd sound, SaveFileService saves ) : base( "menu_load", keyboard, menus )
+        {
+			_pictures = pictures;
+			_commands = commands;
+			_screen = screen;
+			_sound = sound;
+			_saves = saves;
+        }
 
-		public override void Show( Host host )
-		{
-			base.Show( host );
-			ScanSaves();
+		public override void Show( )
+        {
+            _saves.Update( );
+
+            base.Show( );
 		}
 
 		public override void KeyEvent( Int32 key )
@@ -52,89 +63,68 @@ namespace SharpQuake.Rendering.UI
 			switch ( key )
 			{
 				case KeysDef.K_ESCAPE:
-					MenuFactory.Show( "menu_singleplayer" );
+					_menus.Show( "menu_singleplayer" );
 					break;
 
 				case KeysDef.K_ENTER:
-					Host.Sound.LocalSound( "misc/menu2.wav" );
-					if ( !_Loadable[Cursor] )
+					_sound.LocalSound( "misc/menu2.wav" );
+
+					if ( !_saves.Files[Cursor].IsLoadable )
 						return;
-					MenuFactory.CurrentMenu.Hide();
 
-					// Host_Loadgame_f can't bring up the loading plaque because too much
-					// stack space has been used, so do it now
-					Host.Screen.BeginLoadingPlaque();
-
-					// issue the load command
-					Host.Commands.Buffer.Append( String.Format( "load s{0}\n", Cursor ) );
+                    _menus.CurrentMenu.Hide();
+                    // issue the load command
+                    _saves.Load( Cursor );
 					return;
 
 				case KeysDef.K_UPARROW:
 				case KeysDef.K_LEFTARROW:
-					Host.Sound.LocalSound( "misc/menu1.wav" );
+					_sound.LocalSound( "misc/menu1.wav" );
 					Cursor--;
+
 					if ( Cursor < 0 )
-						Cursor = MAX_SAVEGAMES - 1;
+						Cursor = SaveFileService.MAX_SAVEGAMES - 1;
 					break;
 
 				case KeysDef.K_DOWNARROW:
 				case KeysDef.K_RIGHTARROW:
-					Host.Sound.LocalSound( "misc/menu1.wav" );
+					_sound.LocalSound( "misc/menu1.wav" );
 					Cursor++;
-					if ( Cursor >= MAX_SAVEGAMES )
+
+					if ( Cursor >= SaveFileService.MAX_SAVEGAMES )
 						Cursor = 0;
 					break;
 			}
 		}
 
-		public override void Draw( )
-		{
-			var p = Host.Pictures.Cache( "gfx/p_load.lmp", "GL_NEAREST" );
-			Host.Menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
+        private void DrawPlaque( MenuAdorner adorner )
+        {
+            var scale = _menus.UIScale;
 
-			for ( var i = 0; i < MAX_SAVEGAMES; i++ )
-				Host.Menus.Print( 16, 32 + 8 * i, _FileNames[i] );
+            var p = _pictures.Cache( "gfx/p_load.lmp", "GL_NEAREST" );
+            _menus.DrawPic( adorner.MidPointX - ( ( p.Width * scale ) / 2 ), 4 * scale, p, scale: scale );
+        }
+
+        public override void Draw( )
+		{
+            var scale = _menus.UIScale;
+            var adorner = _menus.BuildAdorner( SaveFileService.MAX_SAVEGAMES, 0, 0, width: 152 );
+
+			DrawPlaque( adorner );
+
+			var newUI = Cvars.NewUI.Get<Boolean>( );
+
+			for ( var i = 0; i < SaveFileService.MAX_SAVEGAMES; i++ )
+			{
+				if ( i == Cursor )
+                    adorner.PrintWhite( _saves.Files[i].Name, TextAlignment.Centre );
+                else
+                    adorner.Print( _saves.Files[i].Name, TextAlignment.Centre );
+            }
 
 			// line cursor
-			Host.Menus.DrawCharacter( 8, 32 + Cursor * 8, 12 + ( ( Int32 ) ( Host.RealTime * 4 ) & 1 ) );
-		}
-
-		/// <summary>
-		/// M_ScanSaves
-		/// </summary>
-		protected void ScanSaves( )
-		{
-			for ( var i = 0; i < MAX_SAVEGAMES; i++ )
-			{
-				_FileNames[i] = "--- UNUSED SLOT ---";
-				_Loadable[i] = false;
-				var name = String.Format( "{0}/s{1}.sav", FileSystem.GameDir, i );
-				var fs = FileSystem.OpenRead( name );
-				if ( fs == null )
-					continue;
-
-				using ( var reader = new StreamReader( fs, Encoding.ASCII ) )
-				{
-					var version = reader.ReadLine();
-					if ( version == null )
-						continue;
-					var info = reader.ReadLine();
-					if ( info == null )
-						continue;
-					info = info.TrimEnd( '\0', '_' ).Replace( '_', ' ' );
-					if ( !String.IsNullOrEmpty( info ) )
-					{
-						_FileNames[i] = info;
-						_Loadable[i] = true;
-					}
-				}
-			}
-		}
-
-		public LoadMenu( MenuFactory menuFactory ) : base( "menu_load", menuFactory )
-		{
-			_FileNames = new String[MAX_SAVEGAMES];
-			_Loadable = new Boolean[MAX_SAVEGAMES];
-		}
+			if ( !newUI )
+				_menus.DrawCharacter( adorner.LeftPoint + ( ( 8 * scale ) / 2 ), adorner.LineY( Cursor ), 12 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 ) );
+		}		
 	}
 }

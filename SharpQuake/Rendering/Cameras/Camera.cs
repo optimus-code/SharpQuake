@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -24,9 +24,11 @@
 
 using SharpQuake.Framework;
 using SharpQuake.Framework.Factories;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.Mathematics;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 using System;
-using System.Collections.Generic;
 
 namespace SharpQuake.Rendering.Cameras
 {
@@ -111,11 +113,15 @@ namespace SharpQuake.Rendering.Cameras
 			}
 		}
 
-		private readonly Host _host;
+		private readonly ClientVariableFactory _cvars;
+		private readonly ClientState _clientState;
+		private readonly RenderState _renderState;
 
-		public Camera( Host host )
+		public Camera( ClientVariableFactory cvars, ClientState clientState, RenderState renderState )
         {
-			_host = host;
+			_cvars = cvars;
+			_clientState = clientState;
+			_renderState = renderState;
 
 			ConfigureTransforms( );
 		}
@@ -131,7 +137,7 @@ namespace SharpQuake.Rendering.Cameras
 		{
 			var type = typeof( T );
 			var typeName = type.Name;
-			Add( typeName, ( T ) Activator.CreateInstance( type, _host ) );
+			Add( typeName, ( T ) Activator.CreateInstance( type, _clientState, _renderState ) );
 		}
 
 		public void ApplyTransform<T>( )
@@ -155,15 +161,15 @@ namespace SharpQuake.Rendering.Cameras
 
 		private void InitialiseClientVariables( )
         {
-			if ( _host.Cvars.ClRollSpeed != null )
+			if ( Cvars.ClRollSpeed != null )
 				return;
 
-			_host.Cvars.ClRollSpeed = _host.CVars.Add( "cl_rollspeed", 200f );
-			_host.Cvars.ClRollAngle = _host.CVars.Add( "cl_rollangle", 2.0f );
+			Cvars.ClRollSpeed = _cvars.Add( "cl_rollspeed", 200f );
+			Cvars.ClRollAngle = _cvars.Add( "cl_rollangle", 2.0f );
 
-			_host.Cvars.ClBob = _host.CVars.Add( "cl_bob", 0.02f );
-			_host.Cvars.ClBobCycle = _host.CVars.Add( "cl_bobcycle", 0.6f );
-			_host.Cvars.ClBobUp = _host.CVars.Add( "cl_bobup", 0.5f );
+			Cvars.ClBob = _cvars.Add( "cl_bob", 0.02f );
+			Cvars.ClBobCycle = _cvars.Add( "cl_bobcycle", 0.6f );
+			Cvars.ClBobUp = _cvars.Add( "cl_bobup", 0.5f );
 
 		}
 
@@ -172,16 +178,16 @@ namespace SharpQuake.Rendering.Cameras
 		// Roll is induced by movement and damage
 		public void CalculateViewRoll( )
 		{
-			var cl = _host.Client.cl;
-			var rdef = _host.RenderContext.RefDef;
-			var side = CalculateRoll( ref _host.Client.ViewEntity.angles, ref cl.velocity );
+			var cl = _clientState.Data;
+			var rdef = _renderState.Data;
+			var side = CalculateRoll( ref _clientState.ViewEntity.angles, ref cl.velocity );
 			rdef.viewangles.Z += side;
 
 			if ( _DmgTime > 0 )
 			{
-				rdef.viewangles.Z += _DmgTime / _host.Cvars.KickTime.Get<Single>( ) * _DmgRoll;
-				rdef.viewangles.X += _DmgTime / _host.Cvars.KickTime.Get<Single>( ) * _DmgPitch;
-				_DmgTime -= ( Single ) _host.FrameTime;
+				rdef.viewangles.Z += _DmgTime / Cvars.KickTime.Get<Single>( ) * _DmgRoll;
+				rdef.viewangles.X += _DmgTime / Cvars.KickTime.Get<Single>( ) * _DmgPitch;
+				_DmgTime -= ( Single ) Time.Delta;
 			}
 
 			if ( cl.stats[QStatsDef.STAT_HEALTH] <= 0 )
@@ -202,9 +208,9 @@ namespace SharpQuake.Rendering.Cameras
 			Single sign = side < 0 ? -1 : 1;
 			side = Math.Abs( side );
 
-			var value = _host.Cvars.ClRollAngle.Get<Single>( );
-			if ( side < _host.Cvars.ClRollSpeed.Get<Single>( ) )
-				side = side * value / _host.Cvars.ClRollSpeed.Get<Single>( );
+			var value = Cvars.ClRollAngle.Get<Single>( );
+			if ( side < Cvars.ClRollSpeed.Get<Single>( ) )
+				side = side * value / Cvars.ClRollSpeed.Get<Single>( );
 			else
 				side = value;
 

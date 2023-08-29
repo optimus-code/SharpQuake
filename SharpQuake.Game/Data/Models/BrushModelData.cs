@@ -23,7 +23,11 @@
 /// </copyright>
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using SharpQuake.Framework;
@@ -32,11 +36,20 @@ using SharpQuake.Framework.IO.WAD;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Game.Rendering.Memory;
 using SharpQuake.Game.Rendering.Textures;
+using SharpQuake.Renderer;
+using SharpQuake.Renderer.Models;
+using SharpQuake.Renderer.Textures;
 
 namespace SharpQuake.Game.Data.Models
 {
 	public class BrushModelData : ModelData
     {
+        public Boolean IsWorld
+        {
+            get;
+            private set;
+        }
+
         private Int32 Version
         {
             get;
@@ -264,10 +277,40 @@ namespace SharpQuake.Game.Data.Models
 
         private Byte[] _NoVis = new Byte[BspDef.MAX_MAP_LEAFS / 8]; // byte mod_novis[MAX_MAP_LEAFS/8]
         private Byte[] _Decompressed = new Byte[BspDef.MAX_MAP_LEAFS / 8]; // static byte decompressed[] from Mod_DecompressVis()
-        
-        public BrushModelData( Single subdivideSize, ModelTexture noTexture ) : base( noTexture )
+
+        // TEMPORARY - Will refactor to incorporate better cleanup process
+        private static List<String> UsedTextures
         {
+            get;
+            set;
+        } = new List<String>( );
+
+        private BinaryReader BinaryReader
+        {
+            get;
+            set;
+        }
+
+        public BufferVertex[] VertexBuffer
+        {
+            get;
+            private set;
+        }
+
+        public UInt32[] IndexBuffer
+        {
+            get;
+            private set;
+        }
+
+        private readonly BaseDevice _device;
+
+        public BrushModelData( BaseDevice device, Single subdivideSize, ModelTexture noTexture, Boolean isWorld ) : base( noTexture )
+        {
+            _device = device;
+
             Type = ModelType.Brush;
+            IsWorld = isWorld;
 
             SubdivideSize = subdivideSize;
 
@@ -282,6 +325,8 @@ namespace SharpQuake.Game.Data.Models
         public override void Clear( )
         {
             base.Clear( );
+
+            BinaryReader?.Dispose( );
 
             FirstModelSurface = 0;
             NumModelSurfaces = 0;
@@ -394,6 +439,7 @@ namespace SharpQuake.Game.Data.Models
         {
             Name = name;
             Buffer = buffer;
+            BinaryReader = new BinaryReader( new MemoryStream( Buffer ) );
 
             LoadHeader( );
             SwapLumps( );
@@ -418,6 +464,7 @@ namespace SharpQuake.Game.Data.Models
                 LoadEntities( ref lumps[( Int32 ) Q1Lumps.Entities] );
                 LoadSubModels( ref lumps[( Int32 ) Q1Lumps.Models] );
                 MakeHull0( );
+                BuildSurfaces( );
             }
             else if ( Version == BspDef.Q2_BSPVERSION )
             {
@@ -569,11 +616,14 @@ namespace SharpQuake.Game.Data.Models
             Vertices = verts;
             NumVertices = count;
 
+            BinaryReader.BaseStream.Seek( BaseOffset + l.Position, SeekOrigin.Begin );
+
             for ( Int32 i = 0, offset = BaseOffset + l.Position; i < count; i++, offset += BspVertex.SizeInBytes )
             {
                 if ( Version == BspDef.Q1_BSPVERSION || Version == BspDef.HL_BSPVERSION )
                 {
-                    var src = Utilities.BytesToStructure<BspVertex>( Buffer, offset );
+                    //var src = Utilities.BytesToStructure<BspVertex>( Buffer, offset );
+                    var src = BspVertex.FromBR( BinaryReader );
                     verts[i].position = EndianHelper.LittleVector3( src.point );
                 }
                 else
@@ -581,6 +631,158 @@ namespace SharpQuake.Game.Data.Models
                     var src = Utilities.BytesToStructure<Q3Vertex>( Buffer, offset );
                     verts[i].position = EndianHelper.LittleVector3( src.origin );
                 }
+            }
+        }
+
+        private BaseModelBuffer _modelBuffers;
+
+        private Int32 _ColinElim;
+
+        private void BuildSurfaces()
+        {
+            var vertexBuffer = new List<BufferVertex>( );
+
+            foreach ( var surface in Surfaces )
+            {
+                BuildSurface( vertexBuffer, surface );
+            }
+
+            var indices = new List<UInt32>( );
+            UInt32 ti = 0;
+
+            for ( int vi = 0; vi < vertexBuffer.Count; vi += 3, ti += 3 )
+            {
+                //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 0] ) );
+                //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 1] ) );
+                //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 2] ) );
+
+                //uvs.Add( g.uvs[vi + 0] );
+                //uvs.Add( g.uvs[vi + 1] );
+                //uvs.Add( g.uvs[vi + 2] );
+
+                indices.Add( ti + 2 );
+                indices.Add( ti + 1 );
+                indices.Add( ti + 0 );
+            }
+
+            VertexBuffer = vertexBuffer.ToArray( );
+            IndexBuffer = indices.ToArray( );
+
+            _modelBuffers = BaseModelBuffer.New( _device, VertexBuffer, IndexBuffer );
+        }
+
+        public void Draw( )
+        {
+            //_modelBuffers?.Draw( );
+            _modelBuffers.Begin( );
+
+            //foreach ( var surface in Surfaces )
+            //{
+            //    _modelBuffers.BeginTexture( surface.texinfo.texture.texture );
+            //    _modelBuffers.DrawPoly( surface.polys );
+            //}
+            _modelBuffers.Draw( );
+            _modelBuffers.End( );
+        }
+
+        private void BuildSurface( List<BufferVertex> vertexBuffer, MemorySurface fa )
+        {
+            // reconstruct the polygon
+            var pedges = Edges;
+            var lnumverts = fa.numedges;
+
+            //
+            // draw texture
+            //
+            var poly = new GLPoly( );
+            poly.AllocVerts( lnumverts );
+            poly.next = fa.polys;
+            poly.flags = fa.flags;
+            fa.polys = poly;
+
+            UInt16[] r_pedge_v;
+            Vector3 vec;
+
+            for ( var i = 0; i < lnumverts; i++ )
+            {
+                var lindex = SurfEdges[fa.firstedge + i];
+                if ( lindex > 0 )
+                {
+                    r_pedge_v = pedges[lindex].v;
+                    vec = Vertices[r_pedge_v[0]].position;
+                }
+                else
+                {
+                    r_pedge_v = pedges[-lindex].v;
+                    vec = Vertices[r_pedge_v[1]].position;
+                }
+                var s = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[0] ) + fa.texinfo.vecs[0].W;
+                s /= fa.texinfo.texture.width;
+
+                var t = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[1] ) + fa.texinfo.vecs[1].W;
+                t /= fa.texinfo.texture.height;
+
+                poly.verts[i][0] = vec.X;
+                poly.verts[i][1] = vec.Y;
+                poly.verts[i][2] = vec.Z;
+                poly.verts[i][3] = s;
+                poly.verts[i][4] = t;
+
+                //
+                // lightmap texture coordinates
+                //
+                s = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[0] ) + fa.texinfo.vecs[0].W;
+                s -= fa.texturemins.x;
+                s += fa.light_s * 16;
+                s += 8;
+                s /= RenderDef.BLOCK_WIDTH * 16;
+
+                t = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[1] ) + fa.texinfo.vecs[1].W;
+                t -= fa.texturemins.y;
+                t += fa.light_t * 16;
+                t += 8;
+                t /= RenderDef.BLOCK_HEIGHT * 16;
+
+                poly.verts[i][5] = s;
+                poly.verts[i][6] = t;
+            }
+
+            //
+            // remove co-linear points - Ed
+            //
+            if ( /*!Cvars.glKeepTJunctions.Get<Boolean>( ) &&*/ ( fa.flags & ( Int32 ) Q1SurfaceFlags.Underwater ) == 0 )
+            {
+                for ( var i = 0; i < lnumverts; ++i )
+                {
+                    if ( Utilities.IsCollinear( poly.verts[( i + lnumverts - 1 ) % lnumverts],
+                        poly.verts[i],
+                        poly.verts[( i + 1 ) % lnumverts] ) )
+                    {
+                        Int32 j;
+                        for ( j = i + 1; j < lnumverts; ++j )
+                        {
+                            //int k;
+                            for ( var k = 0; k < ModelDef.VERTEXSIZE; ++k )
+                                poly.verts[j - 1][k] = poly.verts[j][k];
+                        }
+                        --lnumverts;
+                        ++_ColinElim;
+                        // retry next vertex next time, which is now current vertex
+                        --i;
+                    }
+                }
+            }
+            poly.numverts = lnumverts;
+            poly.FirstVertexIndex = vertexBuffer.Count;
+
+            for ( var i = 0; i < poly.numverts; i++ )
+            {
+                var vert = poly.verts[i];
+                vertexBuffer.Add( new BufferVertex
+                {
+                    Position = new Vector3( vert[0], vert[1], vert[2] ),
+                    UV = new Vector2( vert[5], vert[6] )
+                } );
             }
         }
 
@@ -630,6 +832,41 @@ namespace SharpQuake.Game.Data.Models
             }
         }
 
+        private void CleanupUnusedTextures( List<String> newTextures )
+        {
+            if ( !IsWorld )
+                return;
+
+            var cleanup = new List<String>( );
+
+            // If newTextures is null or has no entries, unload all textures
+            if ( newTextures == null || newTextures.Count == 0 )
+            {
+                cleanup = UsedTextures;
+            }
+            else
+            {
+                foreach ( var texture in UsedTextures )
+                {
+                    // If the list of new textures doesn't include previously
+                    // loaded texture, instruct to clean up.
+                    if ( !newTextures.Contains( texture ) )
+                        cleanup.Add( texture );
+                }
+            }
+
+            // Release the textures from GPU and dispose interfaces
+            if ( cleanup.Count > 0 )
+            {
+                foreach ( var texture in cleanup )
+                    UsedTextures.RemoveAll( t => t == texture );
+
+                BaseTexture.DisposeUnused( cleanup.ToArray( ) );
+
+                ConsoleWrapper.DPrint( "TexturePool : Disposed {0} textures\n", cleanup.Count );
+            }
+        }
+
         /// <summary>
         /// Mod_LoadTextures
         /// </summary>
@@ -638,6 +875,7 @@ namespace SharpQuake.Game.Data.Models
             if ( l.Length == 0 )
             {
                 Textures = null;
+                CleanupUnusedTextures( null );
                 return;
             }
 
@@ -664,6 +902,7 @@ namespace SharpQuake.Game.Data.Models
 
                 NumTextures = m.nummiptex;
                 Textures = new ModelTexture[m.nummiptex]; // Hunk_AllocName (m->nummiptex * sizeof(*loadmodel->textures) , loadname);
+                var usedTextures = new List<String>( );
 
                 for ( var i = 0; i < m.nummiptex; i++ )
                 {
@@ -733,12 +972,17 @@ namespace SharpQuake.Game.Data.Models
 
 					onCheckInitSkyTexture( tx );
 
+                    usedTextures.Add( tx.name );
                     //if ( tx.name != null && tx.name.StartsWith( "sky" ) )// !Q_strncmp(mt->name,"sky",3))
                     //    Host.RenderContext.InitSky( tx );
                     //else
                     //    tx.texture = BaseTexture.FromBuffer( Host.Video.Device, tx.name, new ByteArraySegment( tx.pixels ),
                     //        ( Int32 ) tx.width, ( Int32 ) tx.height, true, false );
                 }
+
+                CleanupUnusedTextures( usedTextures );
+
+                UsedTextures.AddRange( usedTextures );
 
                 //
                 // sequence the animations
@@ -1028,11 +1272,16 @@ namespace SharpQuake.Game.Data.Models
                     {
                         dest[surfnum].flags |= ( ( Int32 ) Q1SurfaceFlags.Turbulence | ( Int32 ) Q1SurfaceFlags.Tiled );
 
-                        for ( var i = 0; i < 2; i++ )
-                        {
-                            dest[surfnum].extents[i] = 16384;
-                            dest[surfnum].texturemins[i] = -8192;
-                        }
+                        dest[surfnum].extents.x = 16384;
+                        dest[surfnum].extents.y = 16384;
+                        dest[surfnum].texturemins.x = -8192;
+                        dest[surfnum].texturemins.y = -8192;
+
+                        //for ( var i = 0; i < 2; i++ )
+                        //{
+                        //    dest[surfnum].extents[i] = 16384;
+                        //    dest[surfnum].texturemins[i] = -8192;
+                        //}
 
                         SubdivideSurface( dest[surfnum] );	// cut up polygon for warps
                         continue;
@@ -1349,8 +1598,8 @@ namespace SharpQuake.Game.Data.Models
         /// </summary>
         private void CalcSurfaceExtents( MemorySurface s )
         {
-            var mins = new Single[] { 999999, 999999 };
-            var maxs = new Single[] { -99999, -99999 };
+            var mins = new Vector2( 999999, 999999 );
+            var maxs = new Vector2( -99999, -99999 );
 
             var tex = s.texinfo;
             var v = Vertices;
@@ -1378,21 +1627,30 @@ namespace SharpQuake.Game.Data.Models
                 }
             }
 
-            var bmins = new Int32[2];
-            var bmaxs = new Int32[2];
+            var bmins = new Vector2Int( );
+            var bmaxs = new Vector2Int( );
 
-            for ( var i = 0; i < 2; i++ )
-            {
-                bmins[i] = ( Int32 ) Math.Floor( mins[i] / 16 );
-                bmaxs[i] = ( Int32 ) Math.Ceiling( maxs[i] / 16 );
+            bmins.X = ( Int32 ) Math.Floor( mins.X / 16 );
+            bmaxs.X = ( Int32 ) Math.Ceiling( maxs.X / 16 );
+            bmins.Y = ( Int32 ) Math.Floor( mins.Y / 16 );
+            bmaxs.Y = ( Int32 ) Math.Ceiling( maxs.Y / 16 );
 
-                s.texturemins[i] = ( Int16 ) ( bmins[i] * 16 );
-                s.extents[i] = ( Int16 ) ( ( bmaxs[i] - bmins[i] ) * 16 );
+            s.texturemins.x = ( Int16 ) ( bmins.X * 16 );
+            s.extents.x = ( Int16 ) ( ( bmaxs.X - bmins.X ) * 16 );
+            s.texturemins.y = ( Int16 ) ( bmins.Y * 16 );
+            s.extents.y = ( Int16 ) ( ( bmaxs.Y - bmins.Y ) * 16 );
 
-			}
+            //for ( var i = 0; i < 2; i++ )
+            //{
+            //    bmins[i] = ( Int32 ) Math.Floor( mins[i] / 16 );
+            //    bmaxs[i] = ( Int32 ) Math.Ceiling( maxs[i] / 16 );
 
-			var ssize = ( s.extents[0] >> 4 ) + 1;
-			var tsize = ( s.extents[1] >> 4 ) + 1;
+            //    s.texturemins[i] = ( Int16 ) ( bmins[i] * 16 );
+            //    s.extents[i] = ( Int16 ) ( ( bmaxs[i] - bmins[i] ) * 16 );
+            //}
+
+			var ssize = ( s.extents.x >> 4 ) + 1;
+			var tsize = ( s.extents.y >> 4 ) + 1;
 
 			if ( Version != BspDef.Q3_BSPVERSION && ( tex?.flags & BspDef.TEX_SPECIAL ) == 0 ) //&& s.extents[i] > 512
 			{

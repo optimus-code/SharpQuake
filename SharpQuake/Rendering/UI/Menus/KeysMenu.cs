@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,9 +22,13 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
-using System;
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Rendering.UI.Menus;
+using SharpQuake.Sys;
+using System;
 
 namespace SharpQuake.Rendering.UI
 {
@@ -56,13 +60,21 @@ namespace SharpQuake.Rendering.UI
 
         private Boolean _BindGrab; // bind_grab
 
-        public KeysMenu( MenuFactory menuFactory ) : base( "menu_keys", menuFactory )
+        private readonly snd _sound;
+        private readonly CommandFactory _commands;
+        private readonly PictureFactory _pictures;
+
+        public KeysMenu( IKeyboardInput keyboard, MenuFactory menus, snd sound,
+            CommandFactory commands, PictureFactory pictures ) : base( "menu_keys", keyboard, menus )
         {
+            _commands = commands;
+            _pictures = pictures;
+            _sound = sound;
         }
 
-        public override void Show( Host host )
+        public override void Show( )
         {
-            base.Show( host );
+            base.Show( );
         }
 
         public override void KeyEvent( Int32 key )
@@ -70,15 +82,15 @@ namespace SharpQuake.Rendering.UI
             if ( _BindGrab )
             {
                 // defining a key
-                Host.Sound.LocalSound( "misc/menu1.wav" );
+                _sound.LocalSound( "misc/menu1.wav" );
                 if ( key == KeysDef.K_ESCAPE )
                 {
                     _BindGrab = false;
                 }
                 else if ( key != '`' )
                 {
-                    var cmd = String.Format( "bind \"{0}\" \"{1}\"\n", Host.Keyboard.KeynumToString( key ), _BindNames[Cursor][0] );
-                    Host.Commands.Buffer.Insert( cmd );
+                    var cmd = String.Format( "bind \"{0}\" \"{1}\"\n", _keyboard.KeynumToString( key ), _BindNames[Cursor][0] );
+                    _commands.Buffer.Insert( cmd );
                 }
 
                 _BindGrab = false;
@@ -88,12 +100,12 @@ namespace SharpQuake.Rendering.UI
             switch ( key )
             {
                 case KeysDef.K_ESCAPE:
-                    MenuFactory.Show( "menu_options" );
+                    _menus.Show( "menu_options" );
                     break;
 
                 case KeysDef.K_LEFTARROW:
                 case KeysDef.K_UPARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     Cursor--;
                     if ( Cursor < 0 )
                         Cursor = _BindNames.Length - 1;
@@ -101,7 +113,7 @@ namespace SharpQuake.Rendering.UI
 
                 case KeysDef.K_DOWNARROW:
                 case KeysDef.K_RIGHTARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     Cursor++;
                     if ( Cursor >= _BindNames.Length )
                         Cursor = 0;
@@ -110,7 +122,7 @@ namespace SharpQuake.Rendering.UI
                 case KeysDef.K_ENTER:		// go into bind mode
                     var keys = new Int32[2];
                     FindKeysForCommand( _BindNames[Cursor][0], keys );
-                    Host.Sound.LocalSound( "misc/menu2.wav" );
+                    _sound.LocalSound( "misc/menu2.wav" );
                     if ( keys[1] != -1 )
                         UnbindCommand( _BindNames[Cursor][0] );
                     _BindGrab = true;
@@ -118,21 +130,41 @@ namespace SharpQuake.Rendering.UI
 
                 case KeysDef.K_BACKSPACE:		// delete bindings
                 case KeysDef.K_DEL:				// delete bindings
-                    Host.Sound.LocalSound( "misc/menu2.wav" );
+                    _sound.LocalSound( "misc/menu2.wav" );
                     UnbindCommand( _BindNames[Cursor][0] );
                     break;
             }
         }
 
+        private void DrawPlaque( MenuAdorner adorner )
+        {
+            var scale = _menus.UIScale;
+
+            var p = _pictures.Cache( "gfx/ttl_cstm.lmp", "GL_NEAREST" );
+            _menus.DrawPic( adorner.MidPointX - ( ( p.Width * scale ) / 2 ), 4 * scale, p, scale: scale );
+        }
+
         public override void Draw( )
         {
-            var p = Host.Pictures.Cache( "gfx/ttl_cstm.lmp", "GL_NEAREST" );
-            Host.Menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
+            var adorner = _menus.BuildAdorner( _BindNames.Length, 0, 24 );
 
+            //var p = _pictures.Cache( "gfx/ttl_cstm.lmp", "GL_NEAREST" );
+            //_menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
+            DrawPlaque( adorner );
+            //if ( _BindGrab )
+            //    _menus.Print( 12, 32, "Press a key or button for this action" );
+            //else
+            //    _menus.Print( 18, 32, "Enter to change, backspace to clear" );
             if ( _BindGrab )
-                Host.Menus.Print( 12, 32, "Press a key or button for this action" );
+            {
+                var w = _menus.Measure( "Press a key or button for this action" );
+                _menus.Print( adorner.MidPointX - ( w / 2 ), ( Int32 ) ( adorner.LineY( 0 ) - ( adorner.LineHeight * 2 ) ), "Press a key or button for this action" );
+            }
             else
-                Host.Menus.Print( 18, 32, "Enter to change, backspace to clear" );
+            {
+                var w = _menus.Measure( "Enter to change, backspace to clear" );
+                _menus.Print( adorner.MidPointX - ( w / 2 ), ( Int32 ) ( adorner.LineY( 0 ) - ( adorner.LineHeight * 2 ) ), "Enter to change, backspace to clear" );
+            }
 
             // search for known bindings
             var keys = new Int32[2];
@@ -141,31 +173,46 @@ namespace SharpQuake.Rendering.UI
             {
                 var y = 48 + 8 * i;
 
-                Host.Menus.Print( 16, y, _BindNames[i][1] );
+                //_menus.Print( 16, y, _BindNames[i][1] );
 
                 FindKeysForCommand( _BindNames[i][0], keys );
 
+                var val = "";
+
                 if ( keys[0] == -1 )
                 {
-                    Host.Menus.Print( 140, y, "???" );
+                    val = "???";
+                    //_menus.Print( 140, y, "???" );
                 }
                 else
                 {
-                    var name = Host.Keyboard.KeynumToString( keys[0] );
-                    Host.Menus.Print( 140, y, name );
+                    var name = _keyboard.KeynumToString( keys[0] );
+                    //_menus.Print( 140, y, name );
+                    val = name;
+
                     var x = name.Length * 8;
+
                     if ( keys[1] != -1 )
                     {
-                        Host.Menus.Print( 140 + x + 8, y, "or" );
-                        Host.Menus.Print( 140 + x + 32, y, Host.Keyboard.KeynumToString( keys[1] ) );
+                        val += "^9 or ^0";
+                        val += _keyboard.KeynumToString( keys[1] );
+
+                        //_menus.Print( 140 + x + 8, y, "or" );
+                        //_menus.Print( 140 + x + 32, y, _keyboard.KeynumToString( keys[1] ) );
                     }
                 }
+
+                adorner.PrintValue( _BindNames[i][1], val );
             }
 
+            //if ( _BindGrab )
+            //    _menus.DrawCharacter( 130, 48 + Cursor * 8, '=' );
+            //else
+            //    _menus.DrawCharacter( 130, 48 + Cursor * 8, 12 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 ) );
             if ( _BindGrab )
-                Host.Menus.DrawCharacter( 130, 48 + Cursor * 8, '=' );
+                _menus.DrawCharacter( adorner.MidPointX, adorner.LineY( Cursor + 1 ), '=' );
             else
-                Host.Menus.DrawCharacter( 130, 48 + Cursor * 8, 12 + ( ( Int32 ) ( Host.RealTime * 4 ) & 1 ) );
+                _menus.DrawCharacter( adorner.MidPointX, adorner.LineY( Cursor + 1 ), 12 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 ) );
         }
 
         /// <summary>
@@ -179,7 +226,7 @@ namespace SharpQuake.Rendering.UI
 
             for ( var j = 0; j < 256; j++ )
             {
-                var b = Host.Keyboard.Bindings[j];
+                var b = _keyboard.Bindings[j];
                 if ( String.IsNullOrEmpty( b ) )
                     continue;
 
@@ -202,12 +249,12 @@ namespace SharpQuake.Rendering.UI
 
             for ( var j = 0; j < 256; j++ )
             {
-                var b = Host.Keyboard.Bindings[j];
+                var b = _keyboard.Bindings[j];
                 if ( String.IsNullOrEmpty( b ) )
                     continue;
 
                 if ( String.Compare( b, 0, command, 0, len ) == 0 )
-                    Host.Keyboard.SetBinding( j, String.Empty );
+                    _keyboard.SetBinding( j, String.Empty );
             }
         }
     }

@@ -59,44 +59,46 @@ namespace SharpQuake.Game.Data.Models
 			var path = Path.ChangeExtension( "glquake/" + Path.GetFileNameWithoutExtension( m.Name ), ".ms2" );
 
 			DisposableWrapper<BinaryReader> file;
-			FileSystem.FOpenFile( path, out file );
-			if ( file != null )
+			using ( var archiveEntry = ( IDisposable ) FileSystem.FOpenFile( path, out file ) )
 			{
-				using ( file )
+				if ( file != null )
 				{
-					var reader = file.Object;
-					_NumCommands = reader.ReadInt32();
-					_NumOrder = reader.ReadInt32();
-					for ( var i = 0; i < _NumCommands; i++ )
-						_Commands[i] = reader.ReadInt32();
-					for ( var i = 0; i < _NumOrder; i++ )
-						_VertexOrder[i] = reader.ReadInt32();
-				}
-			}
-			else
-			{
-				//
-				// build it from scratch
-				//
-				ConsoleWrapper.Print( "meshing {0}...\n", m.Name );
-
-				BuildTris( m );     // trifans or lists
-
-				//
-				// save out the cached version
-				//
-				var fullpath = Path.Combine( FileSystem.GameDir, path );
-				Stream fs = FileSystem.OpenWrite( fullpath, true );
-				if ( fs != null )
-					using ( var writer = new BinaryWriter( fs, Encoding.ASCII ) )
+					using ( file )
 					{
-						writer.Write( _NumCommands );
-						writer.Write( _NumOrder );
+						var reader = file.Object;
+						_NumCommands = reader.ReadInt32( );
+						_NumOrder = reader.ReadInt32( );
 						for ( var i = 0; i < _NumCommands; i++ )
-							writer.Write( _Commands[i] );
+							_Commands[i] = reader.ReadInt32( );
 						for ( var i = 0; i < _NumOrder; i++ )
-							writer.Write( _VertexOrder[i] );
+							_VertexOrder[i] = reader.ReadInt32( );
 					}
+				}
+				else
+				{
+					//
+					// build it from scratch
+					//
+					ConsoleWrapper.Print( "meshing {0}...\n", m.Name );
+
+					BuildTris( m );     // trifans or lists
+
+					//
+					// save out the cached version
+					//
+					var fullpath = Path.Combine( FileSystem.GameDir, path );
+					Stream fs = FileSystem.OpenWrite( fullpath, true );
+					if ( fs != null )
+						using ( var writer = new BinaryWriter( fs, Encoding.ASCII ) )
+						{
+							writer.Write( _NumCommands );
+							writer.Write( _NumOrder );
+							for ( var i = 0; i < _NumCommands; i++ )
+								writer.Write( _Commands[i] );
+							for ( var i = 0; i < _NumOrder; i++ )
+								writer.Write( _VertexOrder[i] );
+						}
+				}
 			}
 		}
 

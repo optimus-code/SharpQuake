@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,8 +23,8 @@
 /// </copyright>
 
 using System;
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
-using SharpQuake.Framework;
 using SharpQuake.Framework.IO.Input;
 
 namespace SharpQuake.Rendering.UI
@@ -43,38 +43,27 @@ namespace SharpQuake.Rendering.UI
             protected set;
         }
 
-        // CHANGE 
-        protected Host Host
-        {
-            get;
-            set;
-        }
+        protected readonly IKeyboardInput _keyboard;
+        protected readonly MenuFactory _menus;
 
-        protected MenuFactory MenuFactory
-		{
-            get;
-            set;
-		}
-
-        public BaseMenu( String name, MenuFactory menuFactory )
+        public BaseMenu( String name, IKeyboardInput keyboard, MenuFactory menus )
 		{
             Name = name;
-            MenuFactory = menuFactory;
+            _keyboard = keyboard;
+            _menus = menus;
         }
 
         public void Hide( )
         {
-            Host.Keyboard.Destination = KeyDestination.key_game;
-            MenuFactory.SetActive( null );
+            _keyboard.Destination = KeyDestination.key_game;
+            _menus.SetActive( null );
         }
 
-        public virtual void Show( Host host )
+        public virtual void Show( )
         {
-            Host = host;
-
-            Host.Menus.EnterSound = true;
-            Host.Keyboard.Destination = KeyDestination.key_menu;
-            MenuFactory.SetActive( this );
+            _menus.EnterSound = true;
+            _keyboard.Destination = KeyDestination.key_menu;
+            _menus.SetActive( this );
         }
 
         public abstract void KeyEvent( Int32 key );

@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,27 +23,49 @@
 /// </copyright>
 
 using System;
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Networking.Client;
+using SharpQuake.Networking.Server;
+using SharpQuake.Rendering.UI.Menus;
+using SharpQuake.Services;
+using SharpQuake.Sys;
 
 namespace SharpQuake.Rendering.UI
 {
-    public class SaveMenu : LoadMenu
+    public class SaveMenu : BaseMenu
     {
-        public SaveMenu( MenuFactory menuFactory ) : base( "menu_save", menuFactory )
-		{
-		}
+        private readonly PictureFactory _pictures;
+        private readonly snd _sound;
+        private readonly ClientState _clientState;
+        private readonly ServerState _serverState;
+        private readonly SaveFileService _saves;
 
-        public override void Show( Host host )
+        public SaveMenu( IKeyboardInput keyboard, MenuFactory menus, 
+            PictureFactory pictures, snd sound, ClientState clientState, 
+            ServerState serverState, SaveFileService saves ) : base( "menu_save", keyboard, menus )
         {
-            if ( !Host.Server.sv.active )
+            _pictures = pictures;
+            _sound = sound;
+            _clientState = clientState;
+            _serverState = serverState;
+            _saves = saves;
+        }
+
+        public override void Show( )
+        {
+            if ( !_serverState.Data.active )
                 return;
-            if ( Host.Client.cl.intermission != 0 )
+            if ( _clientState.Data.intermission != 0 )
                 return;
-            if ( Host.Server.svs.maxclients != 1 )
+            if ( _serverState.StaticData.maxclients != 1 )
                 return;
 
-            base.Show( host );
+            _saves.Update( );
+
+            base.Show( );
         }
 
         public override void KeyEvent( Int32 key )
@@ -51,42 +73,60 @@ namespace SharpQuake.Rendering.UI
             switch ( key )
             {
                 case KeysDef.K_ESCAPE:
-                    MenuFactory.Show( "menu_singleplayer" );
+                    _menus.Show( "menu_singleplayer" );
                     break;
 
                 case KeysDef.K_ENTER:
-                    MenuFactory.CurrentMenu.Hide( );
-                    Host.Commands.Buffer.Append( String.Format( "save s{0}\n", Cursor ) );
+                    _menus.CurrentMenu.Hide( );
+                    _saves.Save( Cursor );
                     return;
 
                 case KeysDef.K_UPARROW:
                 case KeysDef.K_LEFTARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     Cursor--;
                     if ( Cursor < 0 )
-                        Cursor = MAX_SAVEGAMES - 1;
+                        Cursor = SaveFileService.MAX_SAVEGAMES - 1;
                     break;
 
                 case KeysDef.K_DOWNARROW:
                 case KeysDef.K_RIGHTARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     Cursor++;
-                    if ( Cursor >= MAX_SAVEGAMES )
+                    if ( Cursor >= SaveFileService.MAX_SAVEGAMES )
                         Cursor = 0;
                     break;
             }
         }
 
+        private void DrawPlaque( MenuAdorner adorner )
+        {
+            var scale = _menus.UIScale;
+
+            var p = _pictures.Cache( "gfx/p_save.lmp", "GL_NEAREST" );
+            _menus.DrawPic( adorner.MidPointX - ( ( p.Width * scale ) / 2 ), 4 * scale, p, scale: scale );
+        }
+
         public override void Draw( )
         {
-            var p = Host.Pictures.Cache( "gfx/p_save.lmp", "GL_NEAREST" );
-            Host.Menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
+            var scale = _menus.UIScale;
+            var adorner = _menus.BuildAdorner( SaveFileService.MAX_SAVEGAMES, 0, 0, width: 152 );
 
-            for ( var i = 0; i < MAX_SAVEGAMES; i++ )
-                Host.Menus.Print( 16, 32 + 8 * i, _FileNames[i] );
+            DrawPlaque( adorner );
+
+            var newUI = Cvars.NewUI.Get<Boolean>( );
+
+            for ( var i = 0; i < SaveFileService.MAX_SAVEGAMES; i++ )
+            {
+                if ( i == Cursor )
+                    adorner.PrintWhite( _saves.Files[i].Name, TextAlignment.Centre );
+                else
+                    adorner.Print( _saves.Files[i].Name, TextAlignment.Centre );
+            }
 
             // line cursor
-            Host.Menus.DrawCharacter( 8, 32 + Cursor * 8, 12 + ( ( Int32 ) ( Host.RealTime * 4 ) & 1 ) );
+            if ( !newUI )
+                _menus.DrawCharacter( adorner.LeftPoint + ( ( 8 * scale ) / 2 ), adorner.LineY( Cursor ), 12 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 ) );
         }
     }
 }

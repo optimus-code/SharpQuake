@@ -346,5 +346,16 @@ namespace SharpQuake.Renderer.OpenGL.Textures
         {
             return CurrentTextureNumber++;
         }
+
+        public override void Dispose( )
+        {
+            base.Dispose( );
+
+            if ( GLDesc.TextureNumber >= 0 )
+            {
+                GL.DeleteTexture( GLDesc.TextureNumber );
+                GLDesc.TextureNumber = -1;
+            }
+        }
     }
 }

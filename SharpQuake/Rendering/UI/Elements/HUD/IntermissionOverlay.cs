@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,7 +22,9 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Networking.Client;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements.HUD
@@ -39,15 +41,25 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private HudResources _resources;
 
-        public IntermissionOverlay( Host host ) : base( host )
+
+        private readonly Scr _screen;
+        private readonly Vid _video;
+        private readonly PictureFactory _pictures;
+        private readonly ClientState _clientState;
+
+        public IntermissionOverlay( Scr screen, Vid video, PictureFactory pictures, ClientState clientState )
         {
+            _screen = screen;
+            _video = video;
+            _pictures = pictures;
+            _clientState = clientState;
         }
 
         public override void Initialise( )
         {
             base.Initialise( );
 
-            _resources = _host.Screen.HudResources;
+            _resources = _screen.HudResources;
 
             HasInitialised = true;
         }
@@ -63,29 +75,29 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            var pic = _host.Pictures.Cache( "gfx/complete.lmp", "GL_LINEAR" );
-            _host.Video.Device.Graphics.DrawPicture( pic, 64, 24 );
+            var pic = _pictures.Cache( "gfx/complete.lmp", "GL_LINEAR" );
+            _video.Device.Graphics.DrawPicture( pic, 64, 24 );
 
-            pic = _host.Pictures.Cache( "gfx/inter.lmp", "GL_LINEAR" );
-            _host.Video.Device.Graphics.DrawPicture( pic, 0, 56, hasAlpha: true );
+            pic = _pictures.Cache( "gfx/inter.lmp", "GL_LINEAR" );
+            _video.Device.Graphics.DrawPicture( pic, 0, 56, hasAlpha: true );
 
             // time
-            var dig = _host.Client.cl.completed_time / 60;
+            var dig = _clientState.Data.completed_time / 60;
             IntermissionNumber( 160, 64, dig, 3, 0 );
-            var num = _host.Client.cl.completed_time - dig * 60;
+            var num = _clientState.Data.completed_time - dig * 60;
 
-            _host.Video.Device.Graphics.DrawPicture( _resources.Colon, 234, 64, hasAlpha: true );
+            _video.Device.Graphics.DrawPicture( _resources.Colon, 234, 64, hasAlpha: true );
 
-            _host.Video.Device.Graphics.DrawPicture( _resources.Numbers[0, num / 10], 246, 64, hasAlpha: true );
-            _host.Video.Device.Graphics.DrawPicture( _resources.Numbers[0, num % 10], 266, 64, hasAlpha: true );
+            _video.Device.Graphics.DrawPicture( _resources.Numbers[0, num / 10], 246, 64, hasAlpha: true );
+            _video.Device.Graphics.DrawPicture( _resources.Numbers[0, num % 10], 266, 64, hasAlpha: true );
 
-            IntermissionNumber( 160, 104, _host.Client.cl.stats[QStatsDef.STAT_SECRETS], 3, 0 );
-            _host.Video.Device.Graphics.DrawPicture( _resources.Slash, 232, 104, hasAlpha: true );
-            IntermissionNumber( 240, 104, _host.Client.cl.stats[QStatsDef.STAT_TOTALSECRETS], 3, 0 );
+            IntermissionNumber( 160, 104, _clientState.Data.stats[QStatsDef.STAT_SECRETS], 3, 0 );
+            _video.Device.Graphics.DrawPicture( _resources.Slash, 232, 104, hasAlpha: true );
+            IntermissionNumber( 240, 104, _clientState.Data.stats[QStatsDef.STAT_TOTALSECRETS], 3, 0 );
 
-            IntermissionNumber( 160, 144, _host.Client.cl.stats[QStatsDef.STAT_MONSTERS], 3, 0 );
-            _host.Video.Device.Graphics.DrawPicture( _resources.Slash, 232, 144, hasAlpha: true );
-            IntermissionNumber( 240, 144, _host.Client.cl.stats[QStatsDef.STAT_TOTALMONSTERS], 3, 0 );
+            IntermissionNumber( 160, 144, _clientState.Data.stats[QStatsDef.STAT_MONSTERS], 3, 0 );
+            _video.Device.Graphics.DrawPicture( _resources.Slash, 232, 144, hasAlpha: true );
+            IntermissionNumber( 240, 144, _clientState.Data.stats[QStatsDef.STAT_TOTALMONSTERS], 3, 0 );
         }
 
         /// <summary>
@@ -106,7 +118,7 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
             {
                 var frame = ( str[i] == '-' ? HudResources.STAT_MINUS : str[i] - '0' );
 
-                _host.Video.Device.Graphics.DrawPicture( _resources.Numbers[color, frame], x, y, hasAlpha: true );
+                _video.Device.Graphics.DrawPicture( _resources.Numbers[color, frame], x, y, hasAlpha: true );
 
                 //_host.DrawingContext.DrawTransPic( x, y, _Nums[color, frame] );
                 x += 24;

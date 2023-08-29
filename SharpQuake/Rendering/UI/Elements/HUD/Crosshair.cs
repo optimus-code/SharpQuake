@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,13 +22,28 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Sys;
+using System;
+
 namespace SharpQuake.Rendering.UI.Elements
 {
     public class Crosshair : BaseUIElement
     {
-        public Crosshair( Host host ) : base( host )
+        private Boolean ShowCrosshair
         {
-            HasInitialised = true;
+            get
+            {
+                return Cvars.Crosshair.Get<Single>( ) > 0;
+            }
+        }
+
+        private readonly Scr _screen;
+        private readonly Drawer _drawer;
+
+        public Crosshair( Scr screen, Drawer drawer )
+        {
+            _screen = screen;
+            _drawer = drawer;
         }
 
         public override void Draw( )
@@ -38,8 +53,8 @@ namespace SharpQuake.Rendering.UI.Elements
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            if ( _host.View.Crosshair > 0 )
-                _host.DrawingContext.DrawCharacter( _host.Screen.VRect.x + _host.Screen.VRect.width / 2, _host.Screen.VRect.y + _host.Screen.VRect.height / 2, '+' );
+            if ( ShowCrosshair )
+                _drawer.DrawCharacter( _screen.VRect.x + _screen.VRect.width / 2, _screen.VRect.y + _screen.VRect.height / 2, '+' );
         }
     }
 }

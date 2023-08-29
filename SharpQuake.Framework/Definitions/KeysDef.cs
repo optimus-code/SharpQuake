@@ -188,7 +188,7 @@ namespace SharpQuake.Framework
 		// JACK: Intellimouse(c) Mouse Wheel Support
 		public const Int32 K_MWHEELDOWN = 240;
 
-		public const Int32 MAXCMDLINE = 256;
+		public const Int32 MAXCMDLINE = 512;
 
 		public static KeyName[] KeyNames = new KeyName[]
 		{

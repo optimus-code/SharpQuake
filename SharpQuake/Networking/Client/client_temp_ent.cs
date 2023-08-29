@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -25,7 +25,6 @@
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.Sound;
 using SharpQuake.Framework.Mathematics;
-using SharpQuake.Game.Client;
 using SharpQuake.Game.Data.Models;
 using SharpQuake.Game.World;
 using System;
@@ -36,10 +35,6 @@ namespace SharpQuake
 {
 	partial class client
 	{
-		private Int32 _NumTempEntities; // num_temp_entities
-		private Entity[] _TempEntities = new Entity[ClientDef.MAX_TEMP_ENTITIES]; // cl_temp_entities[MAX_TEMP_ENTITIES]
-		private beam_t[] _Beams = new beam_t[ClientDef.MAX_BEAMS]; // cl_beams[MAX_BEAMS]
-
 		private SoundEffect_t _SfxWizHit; // cl_sfx_wizhit
 		private SoundEffect_t _SfxKnigtHit; // cl_sfx_knighthit
 		private SoundEffect_t _SfxTink1; // cl_sfx_tink1
@@ -49,39 +44,35 @@ namespace SharpQuake
 		private SoundEffect_t _SfxRExp3; // cl_sfx_r_exp3
 
 		// CL_InitTEnts
-		private void InitTempEntities( )
-		{
-			_SfxWizHit = Host.Sound.PrecacheSound( "wizard/hit.wav" );
-			_SfxKnigtHit = Host.Sound.PrecacheSound( "hknight/hit.wav" );
-			_SfxTink1 = Host.Sound.PrecacheSound( "weapons/tink1.wav" );
-			_SfxRic1 = Host.Sound.PrecacheSound( "weapons/ric1.wav" );
-			_SfxRic2 = Host.Sound.PrecacheSound( "weapons/ric2.wav" );
-			_SfxRic3 = Host.Sound.PrecacheSound( "weapons/ric3.wav" );
-			_SfxRExp3 = Host.Sound.PrecacheSound( "weapons/r_exp3.wav" );
+		private void PrecacheSFX( )
+        {
+            _sound.PrecacheAmbientSFX( );
 
-			for ( var i = 0; i < _TempEntities.Length; i++ )
-				_TempEntities[i] = new Entity();
-
-			for ( var i = 0; i < _Beams.Length; i++ )
-				_Beams[i] = new beam_t();
+            _SfxWizHit = _sound.PrecacheSound( "wizard/hit.wav" );
+			_SfxKnigtHit = _sound.PrecacheSound( "hknight/hit.wav" );
+			_SfxTink1 = _sound.PrecacheSound( "weapons/tink1.wav" );
+			_SfxRic1 = _sound.PrecacheSound( "weapons/ric1.wav" );
+			_SfxRic2 = _sound.PrecacheSound( "weapons/ric2.wav" );
+			_SfxRic3 = _sound.PrecacheSound( "weapons/ric3.wav" );
+			_SfxRExp3 = _sound.PrecacheSound( "weapons/r_exp3.wav" );
 		}
 
 		// CL_UpdateTEnts
 		private void UpdateTempEntities( )
 		{
-			_NumTempEntities = 0;
+            _state.NumTempEntities = 0;
 
 			// update lightning
 			for ( var i = 0; i < ClientDef.MAX_BEAMS; i++ )
 			{
-				var b = _Beams[i];
-				if ( b.model == null || b.endtime < cl.time )
+				var b = _state.Beams[i];
+				if ( b.model == null || b.endtime < _state.Data.time )
 					continue;
 
 				// if coming from the player, update the start position
-				if ( b.entity == cl.viewentity )
+				if ( b.entity == _state.Data.viewentity )
 				{
-					b.start = _Entities[cl.viewentity].origin;
+					b.start = _state.Entities[_state.Data.viewentity].origin;
 				}
 
 				// calculate pitch and yaw
@@ -137,19 +128,7 @@ namespace SharpQuake
 		/// </summary>
 		private Entity NewTempEntity( )
 		{
-			if ( NumVisEdicts == ClientDef.MAX_VISEDICTS )
-				return null;
-			if ( _NumTempEntities == ClientDef.MAX_TEMP_ENTITIES )
-				return null;
-
-			var ent = _TempEntities[_NumTempEntities];
-			_NumTempEntities++;
-			_VisEdicts[NumVisEdicts] = ent;
-			NumVisEdicts++;
-
-			ent.colormap = Host.Screen.vid.colormap;
-
-			return ent;
+			return _state.NewTempEntity( _videoState.Data.colormap );
 		}
 
 		/// <summary>
@@ -159,121 +138,121 @@ namespace SharpQuake
 		{
 			Vector3 pos;
 			dlight_t dl;
-			var type = Host.Network.Reader.ReadByte();
+			var type = _network.Reader.ReadByte();
 			switch ( type )
 			{
 				case ProtocolDef.TE_WIZSPIKE:           // spike hitting wall
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.RunParticleEffect( Host.Client.cl.time, ref pos, ref Utilities.ZeroVector, 20, 30 );
-					Host.Sound.StartSound( -1, 0, _SfxWizHit, ref pos, 1, 1 );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.RunParticleEffect( _state.Data.time, ref pos, ref Utilities.ZeroVector, 20, 30 );
+					_sound.StartSound( -1, 0, _SfxWizHit, ref pos, 1, 1 );
 					break;
 
 				case ProtocolDef.TE_KNIGHTSPIKE:            // spike hitting wall
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.RunParticleEffect( Host.Client.cl.time, ref pos, ref Utilities.ZeroVector, 226, 20 );
-					Host.Sound.StartSound( -1, 0, _SfxKnigtHit, ref pos, 1, 1 );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.RunParticleEffect( _state.Data.time, ref pos, ref Utilities.ZeroVector, 226, 20 );
+					_sound.StartSound( -1, 0, _SfxKnigtHit, ref pos, 1, 1 );
 					break;
 
 				case ProtocolDef.TE_SPIKE:          // spike hitting wall
-					pos = Host.Network.Reader.ReadCoords();
+					pos = _network.Reader.ReadCoords();
 #if GLTEST
                     Test_Spawn (pos);
 #else
-					Host.RenderContext.World.Particles.RunParticleEffect( Host.Client.cl.time, ref pos, ref Utilities.ZeroVector, 0, 10 );
+					_renderer.World.Particles.RunParticleEffect( _state.Data.time, ref pos, ref Utilities.ZeroVector, 0, 10 );
 #endif
 					if ( ( MathLib.Random() % 5 ) != 0 )
-						Host.Sound.StartSound( -1, 0, _SfxTink1, ref pos, 1, 1 );
+						_sound.StartSound( -1, 0, _SfxTink1, ref pos, 1, 1 );
 					else
 					{
 						var rnd = MathLib.Random() & 3;
 						if ( rnd == 1 )
-							Host.Sound.StartSound( -1, 0, _SfxRic1, ref pos, 1, 1 );
+							_sound.StartSound( -1, 0, _SfxRic1, ref pos, 1, 1 );
 						else if ( rnd == 2 )
-							Host.Sound.StartSound( -1, 0, _SfxRic2, ref pos, 1, 1 );
+							_sound.StartSound( -1, 0, _SfxRic2, ref pos, 1, 1 );
 						else
-							Host.Sound.StartSound( -1, 0, _SfxRic3, ref pos, 1, 1 );
+							_sound.StartSound( -1, 0, _SfxRic3, ref pos, 1, 1 );
 					}
 					break;
 
 				case ProtocolDef.TE_SUPERSPIKE:         // super spike hitting wall
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.RunParticleEffect( Host.Client.cl.time, ref pos, ref Utilities.ZeroVector, 0, 20 );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.RunParticleEffect( _state.Data.time, ref pos, ref Utilities.ZeroVector, 0, 20 );
 
 					if ( ( MathLib.Random() % 5 ) != 0 )
-						Host.Sound.StartSound( -1, 0, _SfxTink1, ref pos, 1, 1 );
+						_sound.StartSound( -1, 0, _SfxTink1, ref pos, 1, 1 );
 					else
 					{
 						var rnd = MathLib.Random() & 3;
 						if ( rnd == 1 )
-							Host.Sound.StartSound( -1, 0, _SfxRic1, ref pos, 1, 1 );
+							_sound.StartSound( -1, 0, _SfxRic1, ref pos, 1, 1 );
 						else if ( rnd == 2 )
-							Host.Sound.StartSound( -1, 0, _SfxRic2, ref pos, 1, 1 );
+							_sound.StartSound( -1, 0, _SfxRic2, ref pos, 1, 1 );
 						else
-							Host.Sound.StartSound( -1, 0, _SfxRic3, ref pos, 1, 1 );
+							_sound.StartSound( -1, 0, _SfxRic3, ref pos, 1, 1 );
 					}
 					break;
 
 				case ProtocolDef.TE_GUNSHOT:            // bullet hitting wall
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.RunParticleEffect( Host.Client.cl.time, ref pos, ref Utilities.ZeroVector, 0, 20 );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.RunParticleEffect( _state.Data.time, ref pos, ref Utilities.ZeroVector, 0, 20 );
 					break;
 
 				case ProtocolDef.TE_EXPLOSION:          // rocket explosion
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.ParticleExplosion( Host.Client.cl.time, ref pos );
-					dl = AllocDlight( 0 );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.ParticleExplosion( _state.Data.time, ref pos );
+					dl = _state.AllocDlight( 0 );
 					dl.origin = pos;
 					dl.radius = 350;
-					dl.die = ( Single ) cl.time + 0.5f;
+					dl.die = ( Single ) _state.Data.time + 0.5f;
 					dl.decay = 300;
-					Host.Sound.StartSound( -1, 0, _SfxRExp3, ref pos, 1, 1 );
+					_sound.StartSound( -1, 0, _SfxRExp3, ref pos, 1, 1 );
 					break;
 
 				case ProtocolDef.TE_TAREXPLOSION:           // tarbaby explosion
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.BlobExplosion( Host.Client.cl.time, ref pos );
-					Host.Sound.StartSound( -1, 0, _SfxRExp3, ref pos, 1, 1 );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.BlobExplosion( _state.Data.time, ref pos );
+					_sound.StartSound( -1, 0, _SfxRExp3, ref pos, 1, 1 );
 					break;
 
 				case ProtocolDef.TE_LIGHTNING1:             // lightning bolts
-					ParseBeam( Host.Model.ForName( "progs/bolt.mdl", true, ModelType.Alias ) );
+					ParseBeam( _models.ForName( "progs/bolt.mdl", true, ModelType.Alias, false ) );
 					break;
 
 				case ProtocolDef.TE_LIGHTNING2:             // lightning bolts
-					ParseBeam( Host.Model.ForName( "progs/bolt2.mdl", true, ModelType.Alias ) );
+					ParseBeam( _models.ForName( "progs/bolt2.mdl", true, ModelType.Alias, false ) );
 					break;
 
 				case ProtocolDef.TE_LIGHTNING3:             // lightning bolts
-					ParseBeam( Host.Model.ForName( "progs/bolt3.mdl", true, ModelType.Alias ) );
+					ParseBeam( _models.ForName( "progs/bolt3.mdl", true, ModelType.Alias, false ) );
 					break;
 
 				// PGM 01/21/97
 				case ProtocolDef.TE_BEAM:               // grappling hook beam
-					ParseBeam( Host.Model.ForName( "progs/beam.mdl", true, ModelType.Alias ) );
+					ParseBeam( _models.ForName( "progs/beam.mdl", true, ModelType.Alias, false ) );
 					break;
 				// PGM 01/21/97
 
 				case ProtocolDef.TE_LAVASPLASH:
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.LavaSplash( Host.Client.cl.time, ref pos );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.LavaSplash( _state.Data.time, ref pos );
 					break;
 
 				case ProtocolDef.TE_TELEPORT:
-					pos = Host.Network.Reader.ReadCoords();
-					Host.RenderContext.World.Particles.TeleportSplash( Host.Client.cl.time, ref pos );
+					pos = _network.Reader.ReadCoords();
+					_renderer.World.Particles.TeleportSplash( _state.Data.time, ref pos );
 					break;
 
 				case ProtocolDef.TE_EXPLOSION2:             // color mapped explosion
-					pos = Host.Network.Reader.ReadCoords();
-					var colorStart = Host.Network.Reader.ReadByte();
-					var colorLength = Host.Network.Reader.ReadByte();
-					Host.RenderContext.World.Particles.ParticleExplosion( Host.Client.cl.time, ref pos, colorStart, colorLength );
-					dl = AllocDlight( 0 );
+					pos = _network.Reader.ReadCoords();
+					var colorStart = _network.Reader.ReadByte();
+					var colorLength = _network.Reader.ReadByte();
+					_renderer.World.Particles.ParticleExplosion( _state.Data.time, ref pos, colorStart, colorLength );
+					dl = _state.AllocDlight( 0 );
 					dl.origin = pos;
 					dl.radius = 350;
-					dl.die = ( Single ) cl.time + 0.5f;
+					dl.die = ( Single ) _state.Data.time + 0.5f;
 					dl.decay = 300;
-					Host.Sound.StartSound( -1, 0, _SfxRExp3, ref pos, 1, 1 );
+					_sound.StartSound( -1, 0, _SfxRExp3, ref pos, 1, 1 );
 					break;
 
 				default:
@@ -287,20 +266,20 @@ namespace SharpQuake
 		/// </summary>
 		private void ParseBeam( ModelData m )
 		{
-			var ent = Host.Network.Reader.ReadShort();
+			var ent = _network.Reader.ReadShort();
 
-			var start = Host.Network.Reader.ReadCoords();
-			var end = Host.Network.Reader.ReadCoords();
+			var start = _network.Reader.ReadCoords();
+			var end = _network.Reader.ReadCoords();
 
 			// override any beam with the same entity
 			for ( var i = 0; i < ClientDef.MAX_BEAMS; i++ )
 			{
-				var b = _Beams[i];
+				var b = _state.Beams[i];
 				if ( b.entity == ent )
 				{
 					b.entity = ent;
 					b.model = m;
-					b.endtime = ( Single ) ( cl.time + 0.2 );
+					b.endtime = ( Single ) ( _state.Data.time + 0.2 );
 					b.start = start;
 					b.end = end;
 					return;
@@ -310,18 +289,18 @@ namespace SharpQuake
 			// find a free beam
 			for ( var i = 0; i < ClientDef.MAX_BEAMS; i++ )
 			{
-				var b = _Beams[i];
-				if ( b.model == null || b.endtime < cl.time )
+				var b = _state.Beams[i];
+				if ( b.model == null || b.endtime < _state.Data.time )
 				{
 					b.entity = ent;
 					b.model = m;
-					b.endtime = ( Single ) ( cl.time + 0.2 );
+					b.endtime = ( Single ) ( _state.Data.time + 0.2 );
 					b.start = start;
 					b.end = end;
 					return;
 				}
 			}
-			Host.Console.Print( "beam list overflow!\n" );
+			_logger.Print( "beam list overflow!\n" );
 		}
 	}
 }

@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,7 +22,10 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories;
+using SharpQuake.Framework.Factories.IO.WAD;
 using SharpQuake.Renderer.Textures;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements.Warnings
@@ -35,13 +38,22 @@ namespace SharpQuake.Rendering.UI.Elements.Warnings
             set;
         }
 
-        public RAMWarning( Host host ) : base( host )
+        private readonly Scr _screen;
+        private readonly Vid _video;
+        private readonly render _renderer;
+        private readonly WadFactory _wads;
+
+        public RAMWarning( Scr screen, Vid video, render renderer, WadFactory wads )
         {
+            _screen = screen;                
+            _video = video;
+            _renderer = renderer;
+            _wads = wads;
         }
 
         public override void Initialise()
         {
-            Picture = BasePicture.FromWad( _host.Video.Device, _host.Wads.FromTexture( "ram" ), "ram", "GL_LINEAR" );
+            Picture = BasePicture.FromWad( _video.Device, _wads.FromTexture( "ram" ), "ram", "GL_LINEAR" );
             HasInitialised = true;
         }
 
@@ -55,13 +67,13 @@ namespace SharpQuake.Rendering.UI.Elements.Warnings
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            if ( !_host.Cvars.ShowRam.Get<Boolean>( ) )
+            if ( !Cvars.ShowRam.Get<Boolean>( ) )
                 return;
 
-            if ( !_host.RenderContext.CacheTrash )
+            if ( !_renderer.CacheTrash )
                 return;
 
-            _host.Video.Device.Graphics.DrawPicture( Picture, _host.Screen.VRect.x + 32, _host.Screen.VRect.y );
+            _video.Device.Graphics.DrawPicture( Picture, _screen.VRect.x + 32, _screen.VRect.y );
         }
     }
 }

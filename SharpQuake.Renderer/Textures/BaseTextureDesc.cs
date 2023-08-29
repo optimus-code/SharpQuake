@@ -105,5 +105,11 @@ namespace SharpQuake.Renderer.Textures
             get;
             set;
         }
+
+        public virtual Boolean PreservePixelBuffer
+        {
+            get;
+            set;
+        }
     }
 }

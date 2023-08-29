@@ -31,6 +31,8 @@ namespace SharpQuake.Renderer
 {
     public class Font : IDisposable
     {
+        public const Int32 FONT_SIZE_PIXELS = 8;
+
         public BaseDevice Device
         {
             get;
@@ -60,16 +62,30 @@ namespace SharpQuake.Renderer
             Texture = BaseTexture.FromBuffer( Device, Name, buffer, 128, 128, false, true, filter: "GL_NEAREST" );
         }
 
+        public virtual Int32 Measure( UInt32 character )
+        {
+            return 8 * 4;
+        }
+
+        public virtual Int32 MeasureHeight( UInt32 character )
+        {
+            return 8 * 4;
+        }
+
         public virtual Int32 Measure( String str )
         {
-            return str.Length * 8;
+            return str.Length * ( 8 * 4 );
         }
 
         // Draw_String
         public virtual void Draw( Int32 x, Int32 y, String str, Color? color = null )
         {
-            for ( var i = 0; i < str.Length; i++, x += 8 )
-                DrawCharacter( x, y, str[i], color );
+            var xAdvance = x;
+            for ( var i = 0; i < str.Length; i++ )
+            {
+                DrawCharacter( xAdvance, y, str[i], color );
+                xAdvance += CharacterAdvance( ) + Measure( str[i] );
+            }
         }
 
         // Draw_Character
@@ -85,18 +101,101 @@ namespace SharpQuake.Renderer
 
             num &= 255;
 
-            if ( y <= -8 )
+            if ( y <= -FONT_SIZE_PIXELS )
                 return;			// totally off screen
 
             var row = num >> 4;
             var col = num & 15;
 
+            var size = 0.0625f;
             var frow = row * 0.0625f;
             var fcol = col * 0.0625f;
-            var size = 0.0625f;
+
+            var cW = Measure( ( UInt32 ) num );
+            var cH = MeasureHeight( ( UInt32 ) num );
 
             Device.Graphics.DrawTexture2D( Texture,
-                   new RectangleF( fcol, frow, size, size ), new Rectangle( x, y, 8, 8 ), colour );
+                   new RectangleF( fcol, frow, size, size ), new Rectangle( x, y, cW, cH ), colour );
+        }
+
+        public virtual void DrawCharacterStretched( Int32 x, Int32 y, Int32 num, Int32 width, Color? colour = null )
+        {
+            if ( num == 32 )
+                return;		// space
+
+            num &= 255;
+
+            if ( y <= -FONT_SIZE_PIXELS )
+                return;			// totally off screen
+
+            var row = num >> 4;
+            var col = num & 15;
+
+            var size = 0.0625f;
+            var frow = row * 0.0625f;
+            var fcol = col * 0.0625f;
+
+            var cH = MeasureHeight( ( UInt32 ) num );
+
+            Device.Graphics.DrawTexture2D( Texture,
+                   new RectangleF( fcol, frow, size, size ), new Rectangle( x, y, width, cH ), colour );
+        }
+
+        public virtual UInt32[] GetCharacterBuffer( Int32 num )
+        {
+            if ( num == 32 )
+                return null;        // space
+
+            num &= 255;
+            
+
+            var row = num >> 4;
+            var col = num & 15;
+            var size = 0.0625f;
+            var frow = row * size;
+            var fcol = col * size;
+
+            var dataY = ( Int32 ) ( Texture.Desc.Height * frow );
+            var dataX = ( Int32 ) ( Texture.Desc.Width * fcol );
+
+            var dataWidth = 8;
+            var dataHeight = 8;
+
+            var buffer = Texture.Buffer32;
+            var result = new UInt32[dataWidth * dataHeight];
+
+            for ( var y = dataY; y < dataY + dataHeight; y++ )
+            {
+                for ( var x = dataX; x < dataX + dataWidth; x++ )
+                {
+                    var sourceIndex = y * Texture.Desc.Width + x;
+                    var destIndex = ( y - dataY ) * dataWidth + ( x - dataX );
+
+                    if ( sourceIndex >= buffer.Length || destIndex >= result.Length )
+                        continue;
+                    
+                    result[destIndex] = buffer[sourceIndex];
+                }
+            }
+
+            return result;
+        }
+
+        public virtual (Int32 X, Int32 Y) GetCharacterOffset( Int32 num )
+        {
+            return (0, 8 * 4);
+        }
+
+        public Int32 CharacterAdvance( )
+        {
+            return 0;
+        }
+
+        public Int32 CharacterAdvanceHeight( )
+        {
+            var height = MeasureHeight( 'T' );
+
+            return height;
         }
 
         public virtual void Dispose( )

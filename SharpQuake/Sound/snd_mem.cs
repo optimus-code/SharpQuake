@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -26,6 +26,7 @@ using System;
 using System.Text;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.Sound;
+using SharpQuake.Sys;
 
 // snd_mem.c
 
@@ -54,14 +55,14 @@ namespace SharpQuake
 			var riff = helper.FindChunk( "RIFF", offset );
 			if ( riff == -1 )
 			{
-				Host.Console.Print( "Missing RIFF chunk\n" );
+				_logger.Print( "Missing RIFF chunk\n" );
 				return info;
 			}
 
 			var wave = Encoding.ASCII.GetString( wav, offset + 8, 4 );
 			if ( wave != "WAVE" )
 			{
-				Host.Console.Print( "RIFF chunk is not WAVE\n" );
+				_logger.Print( "RIFF chunk is not WAVE\n" );
 				return info;
 			}
 
@@ -71,14 +72,14 @@ namespace SharpQuake
 			var fmt = helper.FindChunk( "fmt ", offset );
 			if ( fmt == -1 )
 			{
-				Host.Console.Print( "Missing fmt chunk\n" );
+				_logger.Print( "Missing fmt chunk\n" );
 				return info;
 			}
 
 			Int32 format = helper.GetLittleShort( fmt + 8 );
 			if ( format != 1 )
 			{
-				Host.Console.Print( "Microsoft PCM format only\n" );
+				_logger.Print( "Microsoft PCM format only\n" );
 				return info;
 			}
 
@@ -112,7 +113,7 @@ namespace SharpQuake
 			var data = helper.FindChunk( "data", offset );
 			if ( data == -1 )
 			{
-				Host.Console.Print( "Missing data chunk\n" );
+				_logger.Print( "Missing data chunk\n" );
 				return info;
 			}
 
@@ -133,7 +134,7 @@ namespace SharpQuake
 		// ResampleSfx
 		private void ResampleSfx( SoundEffect_t sfx, Int32 inrate, Int32 inwidth, ByteArraySegment data )
 		{
-			var sc = ( SoundEffectCache_t ) Host.Cache.Check( sfx.cache );
+			var sc = ( SoundEffectCache_t ) _cache.Check( sfx.cache );
 			if ( sc == null )
 				return;
 
@@ -145,7 +146,7 @@ namespace SharpQuake
 				sc.loopstart = ( Int32 ) ( sc.loopstart / stepscale );
 
 			sc.speed = _shm.speed;
-			if ( Host.Cvars.LoadAs8bit.Get<Boolean>() )
+			if ( Cvars.LoadAs8bit.Get<Boolean>() )
 				sc.width = 1;
 			else
 				sc.width = inwidth;

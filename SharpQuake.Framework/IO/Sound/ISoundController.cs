@@ -33,7 +33,7 @@ namespace SharpQuake.Framework.IO.Sound
 			get;
 		}
 
-		void Initialise( Object host );
+		void Initialise( );
 
 		void Shutdown( );
 

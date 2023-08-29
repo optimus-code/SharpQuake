@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,11 +22,12 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Desktop;
 using SharpQuake.Framework.IO.Input;
 using SharpQuake.Framework.Rendering.UI;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace SharpQuake.Rendering.UI.Elements.Text
 {
@@ -43,9 +44,17 @@ namespace SharpQuake.Rendering.UI.Elements.Text
         // scr_centertime_off
         private String _CenterString; // char	scr_centerstring[1024]
 
-        public CentrePrint( Host host ) : base( host )
+        private readonly VideoState _videoState;
+        private readonly Drawer _drawer;
+        private readonly ClientState _clientState;
+        private readonly IKeyboardInput _keyboard;
+
+        public CentrePrint( VideoState videoState, Drawer drawer, ClientState clientState, IKeyboardInput keyboard )
         {
-            HasInitialised = true;
+            _videoState = videoState;
+            _drawer = drawer;
+            _clientState = clientState;
+            _keyboard = keyboard;
         }
 
         // SCR_CenterPrint
@@ -55,8 +64,8 @@ namespace SharpQuake.Rendering.UI.Elements.Text
         public void Enqueue( String str )
         {
             _CenterString = str;
-            CenterTimeOff = _host.Cvars.CenterTime.Get<Int32>( );
-            _CenterTimeStart = ( Single ) _host.Client.cl.time;
+            CenterTimeOff = Cvars.CenterTime.Get<Int32>( );
+            _CenterTimeStart = ( Single ) _clientState.Data.time;
 
             // count the number of lines for centering
             _CenterLines = 1;
@@ -73,45 +82,64 @@ namespace SharpQuake.Rendering.UI.Elements.Text
             Int32 remaining;
 
             // the finale prints the characters one at a time
-            if ( _host.Client.cl.intermission > 0 )
-                remaining = ( Int32 ) ( _host.Cvars.PrintSpeed.Get<Int32>( ) * ( _host.Client.cl.time - _CenterTimeStart ) );
+            if ( _clientState.Data.intermission > 0 )
+                remaining = ( Int32 ) ( Cvars.PrintSpeed.Get<Int32>( ) * ( _clientState.Data.time - _CenterTimeStart ) );
             else
                 remaining = 9999;
 
-            var y = 48;
-            if ( _CenterLines <= 4 )
-                y = ( Int32 ) ( _host.Screen.vid.height * 0.35 );
+            //var y = _drawer.CharacterAdvanceHeight() * 6;
+
+            //if ( _CenterLines <= 4 )
+            //    y = ( Int32 ) ( _videoState.Data.height * 0.35 );
 
             var lines = _CenterString.Split( '\n' );
+            var y = ( _videoState.Data.height / 2 ) - ( _drawer.CharacterAdvanceHeight( ) * ( lines.Length + 3 ) );
+            //var maxLineWidth = 0;
+
+            //for ( var i = 0; i < lines.Length; i++ )
+            //{
+            //    var line = lines[i].TrimEnd( '\r' );
+            //    var lineWidth = _drawer.MeasureString( line );
+
+            //    if ( lineWidth > maxLineWidth )
+            //        maxLineWidth = lineWidth;
+            //}
+
             for ( var i = 0; i < lines.Length; i++ )
             {
                 var line = lines[i].TrimEnd( '\r' );
-                var x = ( _host.Screen.vid.width - line.Length * 8 ) / 2;
+                var lineWidth = _drawer.MeasureString( line );
 
-                for ( var j = 0; j < line.Length; j++, x += 8 )
+                var startX = ( _videoState.Data.width - lineWidth ) / 2;
+                var xAdvance = startX;
+
+                for ( var j = 0; j < line.Length; j++ )
                 {
-                    _host.DrawingContext.DrawCharacter( x, y, line[j] );
+                    _drawer.DrawCharacter( xAdvance, y, line[j] );
+
+                    xAdvance += _drawer.CharacterAdvance() + _drawer.MeasureCharacter( line[j] );
+
                     if ( remaining-- <= 0 )
                         return;
                 }
-                y += 8;
+                y += _drawer.CharacterAdvanceHeight( );
             }
         }
 
         // SCR_CheckDrawCenterString
         private void CheckDrawCenterString( )
         {
-            _host.Screen.CopyTop = true;
+            _videoState.ScreenCopyTop = true;
 
             if ( _CenterLines > _EraseLines )
                 _EraseLines = _CenterLines;
 
-            CenterTimeOff -= ( Single ) _host.FrameTime;
+            CenterTimeOff -= ( Single ) Time.Delta;
 
-            if ( CenterTimeOff <= 0 && _host.Client.cl.intermission == 0 )
+            if ( CenterTimeOff <= 0 && _clientState.Data.intermission == 0 )
                 return;
 
-            if ( _host.Keyboard.Destination != KeyDestination.key_game )
+            if ( _keyboard.Destination != KeyDestination.key_game )
                 return;
 
             DrawCenterString( );

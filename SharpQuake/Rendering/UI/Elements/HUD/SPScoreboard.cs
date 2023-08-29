@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,6 +23,8 @@
 /// </copyright>
 
 using SharpQuake.Framework;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 using System;
 using System.Text;
 
@@ -40,15 +42,22 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
 
         private HudResources _resources;
 
-        public SPScoreboard( Host host ) : base( host )
+        private readonly Scr _screen;
+        private readonly ClientState _clientState;
+        private readonly VideoState _videoState;
+
+        public SPScoreboard( Scr screen, ClientState clientState, VideoState videoState )
         {
+            _screen = screen;
+            _clientState = clientState;
+            _videoState = videoState;
         }
 
         public override void Initialise( )
         {
             base.Initialise( );
 
-            _resources = _host.Screen.HudResources;
+            _resources = _screen.HudResources;
 
             HasInitialised = true;
         }
@@ -60,8 +69,8 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            _host.Screen.CopyEverithing = true;
-            _host.Screen.FullUpdate = 0;
+            _videoState.ScreenCopyEverything = true;
+            _screen.FullUpdate = 0;
 
             _resources.DrawPic( 0, 0, _resources.ScoreBar );
             SoloScoreboard( );
@@ -73,9 +82,9 @@ namespace SharpQuake.Rendering.UI.Elements.HUD
         private void SoloScoreboard( )
         {
             var sb = new StringBuilder( 80 );
-            var cl = _host.Client.cl;
+            var cl = _clientState.Data;
 
-            sb.AppendFormat( "Monsters:{0,3:d} /{1,3:d}", cl.stats[QStatsDef.STAT_MONSTERS], _host.Client.cl.stats[QStatsDef.STAT_TOTALMONSTERS] );
+            sb.AppendFormat( "Monsters:{0,3:d} /{1,3:d}", cl.stats[QStatsDef.STAT_MONSTERS], _clientState.Data.stats[QStatsDef.STAT_TOTALMONSTERS] );
             _resources.DrawString( 8, 4, sb.ToString( ) );
 
             sb.Length = 0;

@@ -32,7 +32,11 @@ namespace SharpQuake.Framework.IO
         public String filename; // char[MAX_OSPATH];
         public Pak pack; // only one of filename / pack will be used
         public ZipArchive pk3;
-        public String pk3filename;
+        public String pk3filename
+        {
+            get;
+            private set;
+        }
 
         public SearchPath( String path )
         {
@@ -58,8 +62,9 @@ namespace SharpQuake.Framework.IO
             pack = pak;
         }
 
-        public SearchPath( ZipArchive archive )
+        public SearchPath( String path, ZipArchive archive )
         {
+            pk3filename = path;
             pk3 = archive;
         }
     } // searchpath_t;    

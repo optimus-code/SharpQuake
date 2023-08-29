@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -27,6 +27,8 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using SharpQuake.Framework;
+using SharpQuake.Services;
+using SharpQuake.Sys;
 
 namespace SharpQuake
 {
@@ -63,18 +65,18 @@ namespace SharpQuake
             }
         }
 
-        // CHANGE
-        private Host Host
+        private readonly VCRService _vcr;
+        private readonly Network _network;
+
+        public net_vcr( VCRService vcr, Network network )
         {
-            get;
-            set;
+            _vcr = vcr;
+            _network = network;
         }
 
-        public void Initialise( Object host )
+        public void Initialise( )
         {
-            Host = ( Host ) host;
-
-            _Next = Utilities.ReadStructure<VcrRecord>( Host.VcrReader.BaseStream );
+            _Next = Utilities.ReadStructure<VcrRecord>( _vcr.ReadStream );
             _IsInitialised = true;
         }
 
@@ -95,7 +97,7 @@ namespace SharpQuake
 
         public qsocket_t CheckNewConnections()
         {
-            if( Host.Time != _Next.time || _Next.op != VcrOp.VCR_OP_CONNECT )
+            if( Time._Time != _Next.time || _Next.op != VcrOp.VCR_OP_CONNECT )
                 Utilities.Error( "VCR missmatch" );
 
             if( _Next.session == 0 )
@@ -104,11 +106,11 @@ namespace SharpQuake
                 return null;
             }
 
-            var sock = Host.Network.NewSocket();
+            var sock = _network.NewSocket();
             sock.driverdata = _Next.session;
 
             var buf = new Byte[NetworkDef.NET_NAMELEN];
-            Host.VcrReader.Read( buf, 0, buf.Length );
+            _vcr.Read( buf, 0, buf.Length );
             sock.address = Encoding.ASCII.GetString( buf );
 
             ReadNext();
@@ -118,18 +120,18 @@ namespace SharpQuake
 
         public Int32 GetMessage( qsocket_t sock )
         {
-            if( Host.Time != _Next.time || _Next.op != VcrOp.VCR_OP_GETMESSAGE || _Next.session != SocketToSession( sock ) )
+            if( Time._Time != _Next.time || _Next.op != VcrOp.VCR_OP_GETMESSAGE || _Next.session != SocketToSession( sock ) )
                 Utilities.Error( "VCR missmatch" );
 
-            var ret = Host.VcrReader.ReadInt32();
+            var ret = _vcr.ReadInt32();
             if( ret != 1 )
             {
                 ReadNext();
                 return ret;
             }
 
-            var length = Host.VcrReader.ReadInt32();
-            Host.Network.Message.FillFrom( Host.VcrReader.BaseStream, length );
+            var length = _vcr.ReadInt32();
+            _network.Message.FillFrom( _vcr.ReadStream, length );
 
             ReadNext();
 
@@ -138,10 +140,10 @@ namespace SharpQuake
 
         public Int32 SendMessage( qsocket_t sock, MessageWriter data )
         {
-            if( Host.Time != _Next.time || _Next.op != VcrOp.VCR_OP_SENDMESSAGE || _Next.session != SocketToSession( sock ) )
+            if( Time._Time != _Next.time || _Next.op != VcrOp.VCR_OP_SENDMESSAGE || _Next.session != SocketToSession( sock ) )
                 Utilities.Error( "VCR missmatch" );
 
-            var ret = Host.VcrReader.ReadInt32();
+            var ret = _vcr.ReadInt32();
 
             ReadNext();
 
@@ -155,10 +157,10 @@ namespace SharpQuake
 
         public Boolean CanSendMessage( qsocket_t sock )
         {
-            if( Host.Time != _Next.time || _Next.op != VcrOp.VCR_OP_CANSENDMESSAGE || _Next.session != SocketToSession( sock ) )
+            if( Time._Time != _Next.time || _Next.op != VcrOp.VCR_OP_CANSENDMESSAGE || _Next.session != SocketToSession( sock ) )
                 Utilities.Error( "VCR missmatch" );
 
-            var ret = Host.VcrReader.ReadInt32();
+            var ret = _vcr.ReadInt32();
 
             ReadNext();
 
@@ -187,7 +189,7 @@ namespace SharpQuake
         {
             try
             {
-                _Next = Utilities.ReadStructure<VcrRecord>( Host.VcrReader.BaseStream );
+                _Next = Utilities.ReadStructure<VcrRecord>( _vcr.ReadStream );
             }
             catch( IOException )
             {

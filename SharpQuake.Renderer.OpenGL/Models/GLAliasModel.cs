@@ -146,9 +146,9 @@ namespace SharpQuake.Renderer.OpenGL.Models
 
 					// normals and vertexes come from the frame list
 					var point = new Vector3(
-						verts[voffset].v[0] * AliasDesc.AliasHeader.scale.X + AliasDesc.AliasHeader.scale_origin.X,
-						verts[voffset].v[1] * AliasDesc.AliasHeader.scale.Y + AliasDesc.AliasHeader.scale_origin.Y,
-						verts[voffset].v[2] * AliasDesc.AliasHeader.scale.Z + AliasDesc.AliasHeader.scale_origin.Z
+						verts[voffset].X * AliasDesc.AliasHeader.scale.X + AliasDesc.AliasHeader.scale_origin.X,
+						verts[voffset].Y * AliasDesc.AliasHeader.scale.Y + AliasDesc.AliasHeader.scale_origin.Y,
+						verts[voffset].Z * AliasDesc.AliasHeader.scale.Z + AliasDesc.AliasHeader.scale_origin.Z
 					);
 
 					point.X -= shadeVector.X * ( point.Z + lheight );
@@ -233,11 +233,11 @@ namespace SharpQuake.Renderer.OpenGL.Models
 					var l = shadeLight * ( shadeDots[verts[vertsOffset].lightnormalindex] + ( blend * d.X ) );
 					GL.Color3( l, l, l );
 
-					var v = new Vector3( verts[vertsOffset].v[0], verts[vertsOffset].v[1], verts[vertsOffset].v[2] );
-					var v2 = new Vector3( vert2[verts2Offset].v[0], vert2[verts2Offset].v[1], verts[verts2Offset].v[2] );
+					var v = new Vector3( verts[vertsOffset].X, verts[vertsOffset].Y, verts[vertsOffset].Z );
+					var v2 = new Vector3( vert2[verts2Offset].X, vert2[verts2Offset].Y, verts[verts2Offset].Z );
 					d = v2 - v;
 
-					GL.Vertex3( ( Single ) verts[vertsOffset].v[0] + ( blend * d[0] ), verts[vertsOffset].v[1] + ( blend * d[1] ), verts[vertsOffset].v[2] + ( blend * d[2] ) );
+					GL.Vertex3( ( Single ) verts[vertsOffset].X + ( blend * d[0] ), verts[vertsOffset].Y + ( blend * d[1] ), verts[vertsOffset].Z + ( blend * d[2] ) );
 					vertsOffset++;
 					verts2Offset++;
 				} while ( --count > 0 );
@@ -284,7 +284,7 @@ namespace SharpQuake.Renderer.OpenGL.Models
 					// normals and vertexes come from the frame list
 					var l = shadeDots[verts[vertsOffset].lightnormalindex] * shadeLight;
 					GL.Color3( l, l, l );
-					GL.Vertex3( ( Single ) verts[vertsOffset].v[0], verts[vertsOffset].v[1], verts[vertsOffset].v[2] );
+					GL.Vertex3( ( Single ) verts[vertsOffset].X, verts[vertsOffset].Y, verts[vertsOffset].Z );
 					vertsOffset++;
 				} while ( --count > 0 );
 				GL.End( );

@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,6 +23,8 @@
 /// </copyright>
 
 using SharpQuake.Framework.Mathematics;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.Cameras
@@ -41,20 +43,22 @@ namespace SharpQuake.Rendering.Cameras
 			set;
 		}
 
-		private readonly Host _host;
+		private readonly ClientState _clientState;
+		private readonly RenderState _renderState;
 
-		public SwayCameraTransform( Host host )
+		public SwayCameraTransform( ClientState clientState, RenderState renderState )
 		{
-			_host = host;
+            _clientState = clientState;
+			_renderState = renderState;
 		}
 
 		private Vector3 Calculate( )
 		{
-			var time = _host.Client.cl.time;
+			var time = _clientState.Data.time;
 			var v = new Vector3(
-				( Single ) ( Math.Sin( time * _host.Cvars.IPitchCycle.Get<Single>( ) ) * _host.Cvars.IPitchLevel.Get<Single>( ) ),
-				( Single ) ( Math.Sin( time * _host.Cvars.IYawCycle.Get<Single>( ) ) * _host.Cvars.IYawLevel.Get<Single>( ) ),
-				( Single ) ( Math.Sin( time * _host.Cvars.IRollCycle.Get<Single>( ) ) * _host.Cvars.IRollLevel.Get<Single>( ) ) );
+				( Single ) ( Math.Sin( time * Cvars.IPitchCycle.Get<Single>( ) ) * Cvars.IPitchLevel.Get<Single>( ) ),
+				( Single ) ( Math.Sin( time * Cvars.IYawCycle.Get<Single>( ) ) * Cvars.IYawLevel.Get<Single>( ) ),
+				( Single ) ( Math.Sin( time * Cvars.IRollCycle.Get<Single>( ) ) * Cvars.IRollLevel.Get<Single>( ) ) );
 			return v;
 		}
 
@@ -67,11 +71,11 @@ namespace SharpQuake.Rendering.Cameras
 		/// <returns></returns>
 		public void Apply( )
 		{
-			var idleScale = OverrideScale.HasValue ? OverrideScale.Value : _host.Cvars.IdleScale.Get<Single>( );
+			var idleScale = OverrideScale.HasValue ? OverrideScale.Value : Cvars.IdleScale.Get<Single>( );
 
 			var v = Calculate( );
 
-			_host.RenderContext.RefDef.viewangles += v * idleScale;
+			_renderState.Data.viewangles += v * idleScale;
 		}
     }
 }

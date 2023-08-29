@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,12 +23,18 @@
 /// </copyright>
 
 using System;
+using SharpQuake.Desktop;
+using SharpQuake.Factories.Rendering;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.IO.BSP;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Framework.World;
 using SharpQuake.Game.Data.Models;
 using SharpQuake.Game.Rendering.Memory;
+using SharpQuake.Networking.Server;
+using SharpQuake.Sys.Programs;
 
 // world.c -- world query functions
 
@@ -38,18 +44,17 @@ using SharpQuake.Game.Rendering.Memory;
 
 namespace SharpQuake
 {
-	partial class server
-	{
+	public class ServerWorld
+    {
 		// 1/32 epsilon to keep floating point happy
-		private const Single DIST_EPSILON = 0.03125f;
+		public const Single DIST_EPSILON = 0.03125f;
 
-		private const Int32 MOVE_NORMAL = 0;
-		private const Int32 MOVE_NOMONSTERS = 1;
-		private const Int32 MOVE_MISSILE = 2;
+		public const Int32 MOVE_NORMAL = 0;
+		public const Int32 MOVE_NOMONSTERS = 1;
+		public const Int32 MOVE_MISSILE = 2;
 
-		private const Int32 AREA_DEPTH = 4;
-
-		private const Int32 AREA_NODES = 32;
+		public const Int32 AREA_DEPTH = 4;
+		public const Int32 AREA_NODES = 32;
 
 		private areanode_t[] _AreaNodes = new areanode_t[AREA_NODES];
 
@@ -64,11 +69,34 @@ namespace SharpQuake
 
 		private Plane[] _BoxPlanes = new Plane[6];
 
-		/// <summary>
-		/// SV_ClearWorld
-		/// called after the world model has been loaded, before linking any entities
-		/// </summary>
-		public void ClearWorld( )
+        private readonly IConsoleLogger _logger;
+        private readonly ServerState _state;
+        private readonly ProgramsState _programsState;
+        private readonly ProgramsExec _programsExec;
+
+        public ServerWorld( IConsoleLogger logger, ServerState state, ProgramsState programsState,
+			ProgramsExec programsExec )
+        {
+            _logger = logger;
+            _state = state;
+            _programsState = programsState;
+            _programsExec = programsExec;
+
+            for ( var i = 0; i < _BoxClipNodes.Length; i++ )
+                _BoxClipNodes[i].children = new Int16[2];
+
+            for ( var i = 0; i < _BoxPlanes.Length; i++ )
+                _BoxPlanes[i] = new Plane( );
+
+            for ( var i = 0; i < _AreaNodes.Length; i++ )
+                _AreaNodes[i] = new areanode_t( );
+        }
+
+        /// <summary>
+        /// SV_ClearWorld
+        /// called after the world model has been loaded, before linking any entities
+        /// </summary>
+        public void ClearWorld( )
 		{
 			InitBoxHull();
 
@@ -76,23 +104,9 @@ namespace SharpQuake
 				node.Clear();
 			_NumAreaNodes = 0;
 
-			CreateAreaNode( 0, sv.worldmodel.BoundsMin, sv.worldmodel.BoundsMax );
+			CreateAreaNode( 0, _state.Data.worldmodel.BoundsMin, _state.Data.worldmodel.BoundsMax );
 		}
-
-		/// <summary>
-		/// SV_UnlinkEdict
-		/// call before removing an entity, and before trying to move one,
-		/// so it doesn't clip against itself
-		/// flags ent->v.modified
-		/// </summary>
-		public void UnlinkEdict( MemoryEdict ent )
-		{
-			if ( ent.area.Prev == null )
-				return;     // not linked in anywhere
-
-			ent.area.Remove();  //RemoveLink(&ent->area);
-								//ent->area.prev = ent->area.next = NULL;
-		}
+		
 
 		/// <summary>
 		/// SV_LinkEdict
@@ -105,9 +119,9 @@ namespace SharpQuake
 		public void LinkEdict( MemoryEdict ent, Boolean touch_triggers )
 		{
 			if ( ent.area.Prev != null )
-				UnlinkEdict( ent ); // unlink from old position
+				_state.UnlinkEdict( ent ); // unlink from old position
 
-			if ( ent == sv.edicts[0] )
+			if ( ent == _state.Data.edicts[0] )
 				return;     // don't add the world
 
 			if ( ent.free )
@@ -142,7 +156,7 @@ namespace SharpQuake
 			// link to PVS leafs
 			ent.num_leafs = 0;
 			if ( ent.v.modelindex != 0 )
-				FindTouchedLeafs( ent, sv.worldmodel.Nodes[0] );
+				FindTouchedLeafs( ent, _state.Data.worldmodel.Nodes[0] );
 
 			if ( ent.v.solid == Solids.SOLID_NOT )
 				return;
@@ -178,7 +192,7 @@ namespace SharpQuake
 		/// </summary>
 		public Int32 PointContents( ref Vector3 p )
 		{
-			var cont = HullPointContents( sv.worldmodel.Hulls[0], 0, ref p );
+			var cont = HullPointContents( _state.Data.worldmodel.Hulls[0], 0, ref p );
 			if ( cont <= ( Int32 ) Q1Contents.Current0 && cont >= ( Int32 ) Q1Contents.CurrentDown )
 				cont = ( Int32 ) Q1Contents.Water;
 			return cont;
@@ -198,7 +212,7 @@ namespace SharpQuake
 			var clip = new moveclip_t();
 
 			// clip to world
-			clip.trace = ClipMoveToEntity( sv.edicts[0], ref start, ref mins, ref maxs, ref end );
+			clip.trace = ClipMoveToEntity( _state.Data.edicts[0], ref start, ref mins, ref maxs, ref end );
 
 			clip.start = start;
 			clip.end = end;
@@ -323,7 +337,7 @@ namespace SharpQuake
 				{
 					trace.fraction = midf;
 					trace.endpos = mid;
-					Host.Console.DPrint( "backup past 0\n" );
+					_logger.DPrint( "backup past 0\n" );
 					return false;
 				}
 				midf = p1f + ( p2f - p1f ) * frac;
@@ -377,20 +391,6 @@ namespace SharpQuake
 			anode.children[1] = CreateAreaNode( depth + 1, mins1, maxs1 );
 
 			return anode;
-		}
-
-		/// <summary>
-		/// SV_TestEntityPosition
-		/// This could be a lot more efficient...
-		/// </summary>
-		private MemoryEdict TestEntityPosition( MemoryEdict ent )
-		{
-			var trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref ent.v.origin, 0, ent );
-
-			if ( trace.startsolid )
-				return sv.edicts[0];
-
-			return null;
 		}
 
 		/// <summary>
@@ -468,7 +468,7 @@ namespace SharpQuake
 				if ( ent.v.movetype != Movetypes.MOVETYPE_PUSH )
 					Utilities.Error( "SOLID_BSP without MOVETYPE_PUSH" );
 
-				var model = ( BrushModelData ) sv.models[( Int32 ) ent.v.modelindex];
+				var model = ( BrushModelData ) _state.Data.models[( Int32 ) ent.v.modelindex];
 
 				if ( model == null || model.Type != ModelType.Brush )
 					Utilities.Error( "MOVETYPE_PUSH with a non bsp model" );
@@ -514,7 +514,7 @@ namespace SharpQuake
 					return;
 
 				var leaf = ( MemoryLeaf ) node;
-				var leafnum = Array.IndexOf( sv.worldmodel.Leaves, leaf ) - 1;
+				var leafnum = Array.IndexOf( _state.Data.worldmodel.Leaves, leaf ) - 1;
 
 				ent.leafnums[ent.num_leafs] = ( Int16 ) leafnum;
 				ent.num_leafs++;
@@ -554,16 +554,16 @@ namespace SharpQuake
 					ent.v.absmax.y < touch.v.absmin.y || ent.v.absmax.z < touch.v.absmin.z )
 					continue;
 
-				var old_self = Host.Programs.GlobalStruct.self;
-				var old_other = Host.Programs.GlobalStruct.other;
+				var old_self = _programsState.GlobalStruct.self;
+				var old_other = _programsState.GlobalStruct.other;
 
-				Host.Programs.GlobalStruct.self = EdictToProg( touch );
-				Host.Programs.GlobalStruct.other = EdictToProg( ent );
-				Host.Programs.GlobalStruct.time = ( Single ) sv.time;
-				Host.Programs.Execute( touch.v.touch );
+				_programsState.GlobalStruct.self = _state.EdictToProg( touch );
+				_programsState.GlobalStruct.other = _state.EdictToProg( ent );
+				_programsState.GlobalStruct.time = ( Single ) _state.Data.time;
+				_programsExec.Execute( touch.v.touch );
 
-				Host.Programs.GlobalStruct.self = old_self;
-				Host.Programs.GlobalStruct.other = old_other;
+				_programsState.GlobalStruct.self = old_self;
+				_programsState.GlobalStruct.other = old_other;
 			}
 
 			// recurse down both sides
@@ -656,9 +656,9 @@ namespace SharpQuake
 					return;
 				if ( clip.passedict != null )
 				{
-					if ( ProgToEdict( touch.v.owner ) == clip.passedict )
+					if ( _state.ProgToEdict( touch.v.owner ) == clip.passedict )
 						continue;   // don't clip against own missiles
-					if ( ProgToEdict( clip.passedict.v.owner ) == touch )
+					if ( _state.ProgToEdict( clip.passedict.v.owner ) == touch )
 						continue;   // don't clip against owner
 				}
 

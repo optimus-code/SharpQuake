@@ -23,6 +23,8 @@
 /// </copyright>
 
 using System;
+using SharpQuake.Framework.Factories;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.IO;
 
 namespace SharpQuake.Framework
@@ -30,7 +32,7 @@ namespace SharpQuake.Framework
     /// <summary>
     /// Cache_functions
     /// </summary>
-    public class Cache
+    public class Cache : ICache
     {
         public CacheEntry Head
         {
@@ -50,9 +52,15 @@ namespace SharpQuake.Framework
             set;
         }
 
+        public Cache( CommandFactory commands )
+        {
+            commands.Add( "flush", Flush );
+
+            Initialise( 1024 * 1024 * 512 ); // debug
+        }
 
         // Cache_Init
-        public void Initialise( Int32 capacity )
+        private void Initialise( Int32 capacity )
         {
             Capacity = capacity;
             BytesAllocated = 0;
@@ -111,14 +119,14 @@ namespace SharpQuake.Framework
         /// </summary>
         public void Report( )
         {
-            ConsoleWrapper.DPrint( "{0,4:F1} megabyte data cache, used {1,4:F1} megabyte\n",
+            ConsoleWrapper.DPrint( "^0{0,4:F1} MB^9 data cache, used ^0{1,4:F1} MB\n",
                 Capacity / ( System.Single ) ( 1024 * 1024 ), BytesAllocated / ( System.Single ) ( 1024 * 1024 ) );
         }
 
         //Cache_Flush
         //
         //Throw everything out, so new data will be demand cached
-        public void Flush( CommandMessage msg )
+        private void Flush( CommandMessage msg )
         {
             while ( Head.Next != Head )
                 Free( Head.Next ); // reclaim the space

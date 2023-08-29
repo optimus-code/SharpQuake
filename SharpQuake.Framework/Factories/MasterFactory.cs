@@ -37,7 +37,16 @@ namespace SharpQuake.Framework.Factories.IO
         {
             var instance = Activator.CreateInstance<TFactory>( );
 
-            Add( ItemType.Name, instance );
+            Add( typeof( TFactory ).Name, instance );
+
+            return instance;
+        }
+
+        public TFactory AddFactory<TFactory>( params Object[] parameters ) where TFactory : IBaseFactory
+        {
+            var instance = ( TFactory ) Activator.CreateInstance( typeof( TFactory ), parameters );
+
+            Add( typeof( TFactory ).Name, instance );
 
             return instance;
         }

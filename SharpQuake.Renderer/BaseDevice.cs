@@ -23,6 +23,7 @@
 /// </copyright>
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -82,7 +83,13 @@ namespace SharpQuake.Renderer
 			private set;
 		}
 
-		public Palette Palette
+        public Type ModelBufferType
+        {
+            get;
+            private set;
+        }
+
+        public Palette Palette
         {
             get;
             private set;
@@ -118,13 +125,13 @@ namespace SharpQuake.Renderer
             private set;
         }
 
-        public virtual BaseTextureFilter[] TextureFilters
+        public virtual Dictionary<String, BaseTextureFilter> TextureFilters
         {
             get;
             protected set;
         }
 
-        public virtual BaseTextureBlendMode[] BlendModes
+        public virtual Dictionary<String, BaseTextureBlendMode> BlendModes
         {
             get;
             protected set;
@@ -154,7 +161,9 @@ namespace SharpQuake.Renderer
             set;
         }
 
-        public BaseDevice( Type descType, Type graphicsType, Type textureAtlasType, Type modelType, Type modelDescType, Type aliasModelType, Type aliasModelDescType, Type textureType, Type textureDescType )
+        public BaseDevice( Type descType, Type graphicsType, Type textureAtlasType, Type modelType,
+            Type modelDescType, Type aliasModelType, Type aliasModelDescType, Type textureType, 
+            Type textureDescType, Type modelBufferType )
         {
             Desc = ( BaseDeviceDesc ) Activator.CreateInstance( descType );
             TextureType = textureType;
@@ -164,6 +173,7 @@ namespace SharpQuake.Renderer
             ModelDescType = modelDescType;
 			AliasModelType = aliasModelType;
 			AliasModelDescType = aliasModelDescType;
+            ModelBufferType = modelBufferType;
             Palette = new Palette( this );
             Graphics = ( BaseGraphics ) Activator.CreateInstance( graphicsType, this );
             TextureAtlas = ( BaseTextureAtlas ) Activator.CreateInstance( TextureAtlasType, this, DrawDef.MAX_SCRAPS, DrawDef.BLOCK_WIDTH, DrawDef.BLOCK_HEIGHT );
@@ -252,7 +262,10 @@ namespace SharpQuake.Renderer
 
         public virtual BaseTextureFilter GetTextureFilters( String name )
         {
-            return TextureFilters?.Where( tf => tf.Name == name ).FirstOrDefault( );
+            if ( TextureFilters == null || !TextureFilters.ContainsKey( name ) )
+                return null;
+
+            return TextureFilters[name];
         }
 
         public virtual void SetTextureFilters( String name )
@@ -262,7 +275,10 @@ namespace SharpQuake.Renderer
 
         public virtual BaseTextureBlendMode GetBlendMode( String name )
         {
-            return BlendModes?.Where( tf => tf.Name == name ).FirstOrDefault( );
+            if ( BlendModes == null || !BlendModes.ContainsKey( name ) )
+                return null;
+
+            return BlendModes[name];
         }
 
         public virtual void SetBlendMode( String name )

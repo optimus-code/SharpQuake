@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,8 +23,11 @@
 /// </copyright>
 
 using System;
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Rendering.UI.Menus;
+using SharpQuake.Sys;
 
 namespace SharpQuake.Rendering.UI
 {
@@ -32,8 +35,16 @@ namespace SharpQuake.Rendering.UI
     {
         private const Int32 MULTIPLAYER_ITEMS = 3;
 
-        public MultiplayerMenu( MenuFactory menuFactory ) : base( "menu_multiplayer", menuFactory )
+        private readonly Network _network;
+        private readonly snd _sound;
+        private readonly PictureFactory _pictures;
+
+        public MultiplayerMenu( IKeyboardInput keyboard, MenuFactory menus, Network network,
+            snd sound, PictureFactory pictures ) : base( "menu_multiplayer", keyboard, menus )
         {
+            _network = network;
+            _sound = sound;
+            _pictures = pictures;
         }
 
         public override void KeyEvent( Int32 key )
@@ -41,57 +52,113 @@ namespace SharpQuake.Rendering.UI
             switch ( key )
             {
                 case KeysDef.K_ESCAPE:
-                    MenuFactory.Show( "menu_main" );
+                    _menus.Show( "menu_main" );
                     break;
 
                 case KeysDef.K_DOWNARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     if ( ++Cursor >= MULTIPLAYER_ITEMS )
                         Cursor = 0;
                     break;
 
                 case KeysDef.K_UPARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     if ( --Cursor < 0 )
                         Cursor = MULTIPLAYER_ITEMS - 1;
                     break;
 
                 case KeysDef.K_ENTER:
-                    Host.Menus.EnterSound = true;
+                    _menus.EnterSound = true;
                     switch ( Cursor )
                     {
                         case 0:
-                            if ( Host.Network.TcpIpAvailable )
-                                MenuFactory.Show( "menu_lan_config" );
+                            if ( _network.TcpIpAvailable )
+                                _menus.Show( "menu_lan_config" );
                             break;
 
                         case 1:
-                            if ( Host.Network.TcpIpAvailable )
-                                MenuFactory.Show( "menu_lan_config" );
+                            if ( _network.TcpIpAvailable )
+                                _menus.Show( "menu_lan_config" );
                             break;
 
                         case 2:
-                            MenuFactory.Show( "menu_setup" );
+                            _menus.Show( "menu_setup" );
                             break;
                     }
                     break;
             }
         }
 
+        static String[] OPTIONS = new[]
+        {
+            "Join a Game",
+            "New Game",
+            "Setup"
+        };
+
+        private void DrawPlaque( MenuAdorner adorner )
+        {
+            var scale = _menus.UIScale;
+
+            //_menus.DrawTransPic( 16 * scale, 4 * scale, _pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" ), scale: scale );
+            var logoPic = _pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" );
+            _menus.DrawTransPic( adorner.LeftPoint - ( logoPic.Width * _menus.UIScale ), adorner.MidPointY - ( ( logoPic.Height * scale ) / 2 ), logoPic, scale: scale );
+
+            var p = _pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
+            _menus.DrawPic( adorner.MidPointX - ( ( p.Width * scale ) / 2 ), 4 * scale, p, scale: scale );
+        }
+
         public override void Draw( )
         {
-            Host.Menus.DrawTransPic( 16, 4, Host.Pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" ) );
-            var p = Host.Pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
-            Host.Menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
-            Host.Menus.DrawTransPic( 72, 32, Host.Pictures.Cache( "gfx/mp_menu.lmp", "GL_NEAREST" ) );
+            var scale = _menus.UIScale;
+            var adorner = _menus.BuildAdorner( OPTIONS.Length + ( _network.TcpIpAvailable ? 0 : 1 ), 0, 0, width: 152, isBigFont: true );
 
-            Single f = ( Int32 ) ( Host.Time * 10 ) % 6;
+            DrawPlaque( adorner );
 
-            Host.Menus.DrawTransPic( 54, 32 + Cursor * 20, Host.Pictures.Cache( String.Format( "gfx/menudot{0}.lmp", f + 1 ), "GL_NEAREST" ) );
+            var newUI = Cvars.NewUI.Get<Boolean>( );
 
-            if ( Host.Network.TcpIpAvailable )
+            if ( newUI )
+            {
+                for ( var i = 0; i < OPTIONS.Length; i++ )
+                {
+                    var text = OPTIONS[i];
+
+                    if ( Cursor == i )
+                        adorner.PrintWhite( text, TextAlignment.Centre );
+                    else
+                        adorner.Print( text, TextAlignment.Centre );
+                }
+            }
+            else
+            {
+                var options = _pictures.Cache( "gfx/mp_menu.lmp", "GL_NEAREST" );
+                var optionsY = adorner.MidPointY - ( ( options.Height * scale ) / 2 );
+                var optionsX = adorner.MidPointX - ( ( options.Width * scale ) / 2 );
+
+                _menus.DrawTransPic( optionsX, optionsY, options, scale: scale );
+
+                var f = ( Int32 ) ( Time._Time * 10 ) % 6;
+                //_menus.DrawTransPic( 54 * scale, ( 32 + Cursor * 20 ) * scale, _pictures.Cache( String.Format( "gfx/menudot{0}.lmp", f + 1 ), "GL_NEAREST" ), scale: scale );
+
+                var cursorPic = _pictures.Cache( String.Format( "gfx/menudot{0}.lmp", f + 1 ), "GL_NEAREST" );
+
+                _menus.DrawTransPic( adorner.LeftPoint + ( ( cursorPic.Width * scale ) / 2 ), optionsY + ( 20 * Cursor * scale ), cursorPic, scale: scale );
+            }
+
+            //_menus.DrawTransPic( 16, 4, _pictures.Cache( "gfx/qplaque.lmp", "GL_NEAREST" ) );
+            //var p = _pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
+            //_menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
+            //_menus.DrawTransPic( 72, 32, _pictures.Cache( "gfx/mp_menu.lmp", "GL_NEAREST" ) );
+
+           // Single f = ( Int32 ) ( Time._Time * 10 ) % 6;
+
+            //_menus.DrawTransPic( 54, 32 + Cursor * 20, _pictures.Cache( String.Format( "gfx/menudot{0}.lmp", f + 1 ), "GL_NEAREST" ) );
+
+            if ( _network.TcpIpAvailable )
                 return;
-            Host.Menus.PrintWhite( ( 320 / 2 ) - ( ( 27 * 8 ) / 2 ), 148, "No Communications Available" );
+
+            adorner.PrintWhite( "No Communications Available" );
+            //_menus.PrintWhite( ( 320 / 2 ) - ( ( 27 * 8 ) / 2 ), 148, "No Communications Available" );
         }
     }
 }

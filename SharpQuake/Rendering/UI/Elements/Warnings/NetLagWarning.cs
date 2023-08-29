@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,7 +22,11 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories;
+using SharpQuake.Framework.Factories.IO.WAD;
+using SharpQuake.Networking.Client;
 using SharpQuake.Renderer.Textures;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements.Warnings
@@ -35,13 +39,22 @@ namespace SharpQuake.Rendering.UI.Elements.Warnings
             set;
         }
 
-        public NetLagWarning( Host host ) : base( host )
+        private readonly Scr _screen;
+        private readonly Vid _video;
+        private readonly WadFactory _wads;
+        private readonly ClientState _clientState;
+
+        public NetLagWarning( Scr screen, Vid video, WadFactory wads, ClientState clientState )
         {
+            _screen = screen;
+            _video = video;
+            _wads = wads;
+            _clientState = clientState;
         }
 
         public override void Initialise()
         {
-            Picture = BasePicture.FromWad( _host.Video.Device, _host.Wads.FromTexture( "net" ), "net", "GL_LINEAR" );
+            Picture = BasePicture.FromWad( _video.Device, _wads.FromTexture( "net" ), "net", "GL_LINEAR" );
             HasInitialised = true;
         }
 
@@ -55,13 +68,13 @@ namespace SharpQuake.Rendering.UI.Elements.Warnings
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            if ( _host.RealTime - _host.Client.cl.last_received_message < 0.3 )
+            if ( Time.Absolute - _clientState.Data.last_received_message < 0.3 )
                 return;
 
-            if ( _host.Client.cls.demoplayback )
+            if ( _clientState.StaticData.demoplayback )
                 return;
 
-            _host.Video.Device.Graphics.DrawPicture( Picture, _host.Screen.VRect.x + 64, _host.Screen.VRect.y );
+            _video.Device.Graphics.DrawPicture( Picture, _screen.VRect.x + 64, _screen.VRect.y );
         }
     }
 }

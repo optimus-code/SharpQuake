@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,9 +22,12 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
-using System;
+using SharpQuake.Desktop;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Sys;
+using System;
 
 namespace SharpQuake.Rendering.UI
 {
@@ -32,16 +35,26 @@ namespace SharpQuake.Rendering.UI
     {
         private Boolean _Sorted;
 
-        public ServerListMenu( MenuFactory menuFactory ) : base( "menu_server_list", menuFactory )
+        private readonly Network _network;
+        private readonly snd _sound;
+        private readonly PictureFactory _pictures;
+        private readonly CommandFactory _commands;
+
+        public ServerListMenu( IKeyboardInput keyboard, MenuFactory menus, Network network,
+            snd sound, PictureFactory pictures, CommandFactory commands ) : base( "menu_server_list", keyboard, menus )
         {
+            _network = network;
+            _sound = sound;
+            _pictures = pictures;
+            _commands = commands;
         }
 
-        public override void Show( Host host )
+        public override void Show( )
         {
-            base.Show( host );
+            base.Show( );
             Cursor = 0;
-            Host.Menus.ReturnOnError = false;
-            Host.Menus.ReturnReason = String.Empty;
+            _menus.ReturnOnError = false;
+            _menus.ReturnReason = String.Empty;
             _Sorted = false;
         }
 
@@ -50,36 +63,36 @@ namespace SharpQuake.Rendering.UI
             switch ( key )
             {
                 case KeysDef.K_ESCAPE:
-                    MenuFactory.Show( "menu_lan_config" );
+                    _menus.Show( "menu_lan_config" );
                     break;
 
                 case KeysDef.K_SPACE:
-                    MenuFactory.Show( "menu_search" );
+                    _menus.Show( "menu_search" );
                     break;
 
                 case KeysDef.K_UPARROW:
                 case KeysDef.K_LEFTARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     Cursor--;
                     if ( Cursor < 0 )
-                        Cursor = Host.Network.HostCacheCount - 1;
+                        Cursor = _network.HostCacheCount - 1;
                     break;
 
                 case KeysDef.K_DOWNARROW:
                 case KeysDef.K_RIGHTARROW:
-                    Host.Sound.LocalSound( "misc/menu1.wav" );
+                    _sound.LocalSound( "misc/menu1.wav" );
                     Cursor++;
-                    if ( Cursor >= Host.Network.HostCacheCount )
+                    if ( Cursor >= _network.HostCacheCount )
                         Cursor = 0;
                     break;
 
                 case KeysDef.K_ENTER:
-                    Host.Sound.LocalSound( "misc/menu2.wav" );
-                    Host.Menus.ReturnMenu = this;
-                    Host.Menus.ReturnOnError = true;
+                    _sound.LocalSound( "misc/menu2.wav" );
+                    _menus.ReturnMenu = this;
+                    _menus.ReturnOnError = true;
                     _Sorted = false;
-                    MenuFactory.CurrentMenu.Hide( );
-                    Host.Commands.Buffer.Append( String.Format( "connect \"{0}\"\n", Host.Network.HostCache[Cursor].cname ) );
+                    _menus.CurrentMenu.Hide( );
+                    _commands.Buffer.Append( String.Format( "connect \"{0}\"\n", _network.HostCache[Cursor].cname ) );
                     break;
 
                 default:
@@ -91,34 +104,36 @@ namespace SharpQuake.Rendering.UI
         {
             if ( !_Sorted )
             {
-                if ( Host.Network.HostCacheCount > 1 )
+                if ( _network.HostCacheCount > 1 )
                 {
                     Comparison<hostcache_t> cmp = delegate ( hostcache_t a, hostcache_t b )
                     {
                         return String.Compare( a.cname, b.cname );
                     };
 
-                    Array.Sort( Host.Network.HostCache, cmp );
+                    Array.Sort( _network.HostCache, cmp );
                 }
                 _Sorted = true;
             }
 
-            var p = Host.Pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
-            Host.Menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
-            for ( var n = 0; n < Host.Network.HostCacheCount; n++ )
+            var p = _pictures.Cache( "gfx/p_multi.lmp", "GL_NEAREST" );
+            _menus.DrawPic( ( 320 - p.Width ) / 2, 4, p );
+
+            for ( var n = 0; n < _network.HostCacheCount; n++ )
             {
-                var hc = Host.Network.HostCache[n];
+                var hc = _network.HostCache[n];
                 String tmp;
                 if ( hc.maxusers > 0 )
                     tmp = String.Format( "{0,-15} {1,-15} {2:D2}/{3:D2}\n", hc.name, hc.map, hc.users, hc.maxusers );
                 else
                     tmp = String.Format( "{0,-15} {1,-15}\n", hc.name, hc.map );
-                Host.Menus.Print( 16, 32 + 8 * n, tmp );
+                _menus.Print( 16, 32 + 8 * n, tmp );
             }
-            Host.Menus.DrawCharacter( 0, 32 + Cursor * 8, 12 + ( ( Int32 ) ( Host.RealTime * 4 ) & 1 ) );
 
-            if ( !String.IsNullOrEmpty( Host.Menus.ReturnReason ) )
-                Host.Menus.PrintWhite( 16, 148, Host.Menus.ReturnReason );
+            _menus.DrawCharacter( 0, 32 + Cursor * 8, 12 + ( ( Int32 ) ( Time.Absolute * 4 ) & 1 ) );
+
+            if ( !String.IsNullOrEmpty( _menus.ReturnReason ) )
+                _menus.PrintWhite( 16, 148, _menus.ReturnReason );
         }
     }
 }

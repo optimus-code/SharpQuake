@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,19 +22,22 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories.Rendering;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.BSP;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Framework.World;
 using SharpQuake.Game.Data.Models;
 using SharpQuake.Game.Rendering.Memory;
 using SharpQuake.Game.World;
-using SharpQuake.Renderer;
+using SharpQuake.Logging;
+using SharpQuake.Networking.Client;
 using SharpQuake.Renderer.Models;
+using SharpQuake.Rendering.Cameras;
+using SharpQuake.Sys;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 namespace SharpQuake.Rendering.Environment
 {
@@ -53,16 +56,30 @@ namespace SharpQuake.Rendering.Environment
             private set;
         }
 
-        private readonly Host _host;
+        private readonly IConsoleLogger _logger;
+        private readonly ClientState _clientState;
+        private readonly render _renderer;
+        private readonly Vid _video;
+        private readonly Drawer _drawer;
+        private readonly ChaseView _chaseView;
+        private readonly ModelFactory _models;
 
-        public Entities( Host host )
+        public Entities( IConsoleLogger logger, ClientState clientState, render renderer, Vid video,
+            Drawer drawer, ChaseView chaseView, ModelFactory models, IGameRenderer gameRenderer,
+            RenderState renderState )
         {
-            _host = host;
+            _logger = logger;
+            _clientState = clientState;
+            _renderer = renderer;
+            _video = video;
+            _drawer = drawer;
+            _chaseView = chaseView;
+            _models = models;
 
-            Surfaces = new Surfaces( host );
+            Surfaces = new Surfaces( _clientState, _renderer, _video, _drawer, gameRenderer, renderState );
         }
 
-        public void Reset()
+        public void Reset( )
         {
             AliasPolys = 0;
         }
@@ -72,17 +89,17 @@ namespace SharpQuake.Rendering.Environment
         /// </summary>
         public void DrawEntitiesOnList( )
         {
-            if ( !_host.Cvars.DrawEntities.Get<Boolean>( ) )
+            if ( !Cvars.DrawEntities.Get<Boolean>( ) )
                 return;
 
-            for ( var i = 0; i < _host.Client.NumVisEdicts; i++ )
+            for ( var i = 0; i < _clientState.NumVisEdicts; i++ )
             {
-                var currentEntity = _host.Client.VisEdicts[i];
+                var currentEntity = _clientState.VisEdicts[i];
 
                 switch ( currentEntity.model.Type )
                 {
                     case ModelType.Alias:
-                        currentEntity.useInterpolation = _host.Cvars.AnimationBlend.Get<Boolean>( );
+                        currentEntity.useInterpolation = Cvars.AnimationBlend.Get<Boolean>( );
                         DrawAliasModel( currentEntity, 0f );
                         break;
 
@@ -97,9 +114,9 @@ namespace SharpQuake.Rendering.Environment
 
             // draw sprites seperately, because of alpha blending
 
-            for ( var i = 0; i < _host.Client.NumVisEdicts; i++ )
+            for ( var i = 0; i < _clientState.NumVisEdicts; i++ )
             {
-                var _CurrentEntity = _host.Client.VisEdicts[i];
+                var _CurrentEntity = _clientState.VisEdicts[i];
 
                 switch ( _CurrentEntity.model.Type )
                 {
@@ -121,28 +138,28 @@ namespace SharpQuake.Rendering.Environment
             var mins = entity.origin + clmodel.BoundsMin;
             var maxs = entity.origin + clmodel.BoundsMax;
 
-            if ( Utilities.CullBox( ref mins, ref maxs, _host.RenderContext.Frustum ) )
+            if ( Utilities.CullBox( ref mins, ref maxs, _renderer.Frustum ) )
                 return;
 
             var entOrigin = entity.origin;
-            var modelOrg = _host.RenderContext.Origin - entOrigin;
+            var modelOrg = _renderer.Origin - entOrigin;
 
             //
             // get lighting information
             //
 
-            var ambientLight = shadeLight = _host.RenderContext.World.Lighting.LightPoint( ref entity.origin );
+            var ambientLight = shadeLight = _renderer.World.Lighting.LightPoint( ref entity.origin );
 
             // allways give the gun some light
-            if ( entity == _host.Client.cl.viewent && ambientLight < 24 )
+            if ( entity == _clientState.Data.viewent && ambientLight < 24 )
                 ambientLight = shadeLight = 24;
 
             for ( var lnum = 0; lnum < ClientDef.MAX_DLIGHTS; lnum++ )
             {
-                if ( _host.Client.DLights[lnum].die >= _host.Client.cl.time )
+                if ( _clientState.DLights[lnum].die >= _clientState.Data.time )
                 {
-                    var dist = entity.origin - _host.Client.DLights[lnum].origin;
-                    var add = _host.Client.DLights[lnum].radius - dist.Length;
+                    var dist = entity.origin - _clientState.DLights[lnum].origin;
+                    var add = _clientState.DLights[lnum].radius - dist.Length;
                     if ( add > 0 )
                     {
                         ambientLight += add;
@@ -159,7 +176,7 @@ namespace SharpQuake.Rendering.Environment
                 shadeLight = 192 - ambientLight;
 
             // ZOID: never allow players to go totally black
-            var playernum = Array.IndexOf( _host.Client.Entities, entity, 0, _host.Client.cl.maxclients );
+            var playernum = Array.IndexOf( _clientState.Entities, entity, 0, _clientState.Data.maxclients );
             if ( playernum >= 1 )// && i <= cl.maxclients)
                 if ( ambientLight < 8 )
                     ambientLight = shadeLight = 8;
@@ -181,7 +198,7 @@ namespace SharpQuake.Rendering.Environment
             //
             // locate the proper data
             //
-            var paliashdr = _host.Model.GetExtraData( entity.model );
+            var paliashdr = _models.GetExtraData( entity.model );
 
             AliasPolys += paliashdr.numtris;
 
@@ -189,11 +206,11 @@ namespace SharpQuake.Rendering.Environment
 
             if ( !BaseModel.ModelPool.ContainsKey( clmodel.Name ) )
             {
-                var anim = ( Int32 ) ( _host.Client.cl.time * 10 ) & 3;
+                var anim = ( Int32 ) ( _clientState.Data.time * 10 ) & 3;
 
-                var tex = _host.Model.SkinTextures.Where( t => ( ( Renderer.OpenGL.Textures.GLTextureDesc ) t.Desc ).TextureNumber == paliashdr.gl_texturenum[entity.skinnum, anim] ).FirstOrDefault( );
+                var tex = _models.SkinTextures.Where( t => ( ( Renderer.OpenGL.Textures.GLTextureDesc ) t.Desc ).TextureNumber == paliashdr.gl_texturenum[entity.skinnum, anim] ).FirstOrDefault( );
 
-                model = BaseAliasModel.Create( _host.Video.Device, clmodel.Name, tex, paliashdr );
+                model = BaseAliasModel.Create( _video.Device, clmodel.Name, tex, paliashdr );
             }
             else
                 model = ( BaseAliasModel ) BaseModel.ModelPool[clmodel.Name];
@@ -206,13 +223,13 @@ namespace SharpQuake.Rendering.Environment
             model.AliasDesc.EulerAngles = entity.angles;
             model.AliasDesc.AliasFrame = entity.frame;
 
-            model.DrawAliasModel( shadeLight, shadeVector, shadeDots, _host.RenderContext.World.Lighting.LightSpot.Z,
-                _host.RealTime, _host.Client.cl.time,
+            model.DrawAliasModel( shadeLight, shadeVector, shadeDots, _renderer.World.Lighting.LightSpot.Z,
+                Time.Absolute, _clientState.Data.time,
                 ref entity.pose1, ref entity.pose2, ref entity.frame_start_time, ref entity.frame_interval,
                 ref entity.origin1, ref entity.origin2, ref entity.translate_start_time, ref entity.angles1,
                 ref entity.angles2, ref entity.rotate_start_time,
-                ( _host.Cvars.Shadows.Get<Boolean>( ) ), ( _host.Cvars.glSmoothModels.Get<Boolean>( ) ), ( _host.Cvars.glAffineModels.Get<Boolean>( ) ),
-                !_host.Cvars.glNoColors.Get<Boolean>( ), ( clmodel.Name == "progs/eyes.mdl" && _host.Cvars.glDoubleEyes.Get<Boolean>( ) ), entity.useInterpolation );
+                ( Cvars.Shadows.Get<Boolean>( ) ), ( Cvars.glSmoothModels.Get<Boolean>( ) ), ( Cvars.glAffineModels.Get<Boolean>( ) ),
+                !Cvars.glNoColors.Get<Boolean>( ), ( clmodel.Name == "progs/eyes.mdl" && Cvars.glDoubleEyes.Get<Boolean>( ) ), entity.useInterpolation );
         }
 
 
@@ -221,29 +238,29 @@ namespace SharpQuake.Rendering.Environment
         /// </summary>
         public void DrawViewModel( Boolean isEnvMap )
         {
-            if ( !_host.Cvars.DrawViewModel.Get<Boolean>( ) )
+            if ( !Cvars.DrawViewModel.Get<Boolean>( ) )
                 return;
 
-            if ( _host.ChaseView.IsActive )
+            if ( _chaseView.IsActive )
                 return;
 
             if ( isEnvMap )
                 return;
 
-            if ( !_host.Cvars.DrawEntities.Get<Boolean>( ) )
+            if ( !Cvars.DrawEntities.Get<Boolean>( ) )
                 return;
 
-            if ( _host.Client.cl.HasItems( QItemsDef.IT_INVISIBILITY ) )
+            if ( _clientState.Data.HasItems( QItemsDef.IT_INVISIBILITY ) )
                 return;
 
-            if ( _host.Client.cl.stats[QStatsDef.STAT_HEALTH] <= 0 )
+            if ( _clientState.Data.stats[QStatsDef.STAT_HEALTH] <= 0 )
                 return;
 
-            var currentEntity = _host.Client.ViewEnt;
+            var currentEntity = _clientState.ViewEnt;
             if ( currentEntity.model == null )
                 return;
 
-            var j = _host.RenderContext.World.Lighting.LightPoint( ref currentEntity.origin );
+            var j = _renderer.World.Lighting.LightPoint( ref currentEntity.origin );
 
             if ( j < 24 )
                 j = 24;		// allways give some light on gun
@@ -253,10 +270,10 @@ namespace SharpQuake.Rendering.Environment
             // add dynamic lights
             for ( var lnum = 0; lnum < ClientDef.MAX_DLIGHTS; lnum++ )
             {
-                var dl = _host.Client.DLights[lnum];
+                var dl = _clientState.DLights[lnum];
                 if ( dl.radius == 0 )
                     continue;
-                if ( dl.die < _host.Client.cl.time )
+                if ( dl.die < _clientState.Data.time )
                     continue;
 
                 var dist = currentEntity.origin - dl.origin;
@@ -264,12 +281,12 @@ namespace SharpQuake.Rendering.Environment
                 if ( add > 0 )
                     ambientLight += add;
             }
-            var glDepthMax = _host.Video.Device.Desc.DepthMaximum;
-            var glDepthMin = _host.Video.Device.Desc.DepthMinimum;
+            var glDepthMax = _video.Device.Desc.DepthMaximum;
+            var glDepthMin = _video.Device.Desc.DepthMinimum;
             // hack the depth range to prevent view model from poking into walls
-            _host.Video.Device.SetDepth( glDepthMin, glDepthMin + 0.3f * ( glDepthMax - glDepthMin ) );
+            _video.Device.SetDepth( glDepthMin, glDepthMin + 0.3f * ( glDepthMax - glDepthMin ) );
             DrawAliasModel( currentEntity, shadeLight );
-            _host.Video.Device.SetDepth( glDepthMin, glDepthMax );
+            _video.Device.SetDepth( glDepthMin, glDepthMax );
         }
 
         /// <summary>
@@ -290,13 +307,13 @@ namespace SharpQuake.Rendering.Environment
             }
             else
             {	// normal sprite
-                up = _host.RenderContext.ViewUp;// vup;
-                right = _host.RenderContext.ViewRight;// vright;
+                up = _renderer.ViewUp;// vup;
+                right = _renderer.ViewRight;// vright;
             }
 
-            var texture = _host.Model.SpriteTextures.Where( t => ( ( Renderer.OpenGL.Textures.GLTextureDesc ) t.Desc ).TextureNumber == frame.gl_texturenum ).FirstOrDefault( );
+            var texture = _models.SpriteTextures.Where( t => ( ( Renderer.OpenGL.Textures.GLTextureDesc ) t.Desc ).TextureNumber == frame.gl_texturenum ).FirstOrDefault( );
 
-            _host.Video.Device.Graphics.DrawSpriteModel( texture, frame, up, right, e.origin );
+            _video.Device.Graphics.DrawSpriteModel( texture, frame, up, right, e.origin );
         }
 
         /// <summary>
@@ -309,7 +326,7 @@ namespace SharpQuake.Rendering.Environment
 
             if ( ( frame >= psprite.numframes ) || ( frame < 0 ) )
             {
-                _host.Console.Print( "R_DrawSprite: no such frame {0}\n", frame );
+                _logger.Print( "R_DrawSprite: no such frame {0}\n", frame );
                 frame = 0;
             }
 
@@ -324,7 +341,7 @@ namespace SharpQuake.Rendering.Environment
                 var pintervals = pspritegroup.intervals;
                 var numframes = pspritegroup.numframes;
                 var fullinterval = pintervals[numframes - 1];
-                var time = ( Single ) _host.Client.cl.time + currententity.syncbase;
+                var time = ( Single ) _clientState.Data.time + currententity.syncbase;
 
                 // when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
                 // are positive, so we don't have to worry about division by 0
@@ -370,7 +387,7 @@ namespace SharpQuake.Rendering.Environment
             _EMins = ent.origin + entmodel.BoundsMin;
             _EMaxs = ent.origin + entmodel.BoundsMax;
 
-            SplitEntityOnNode( _host.Client.cl.worldmodel.Nodes[0] );
+            SplitEntityOnNode( _clientState.Data.worldmodel.Nodes[0] );
             ent.topnode = _EfragTopNode;
         }
 
@@ -391,13 +408,13 @@ namespace SharpQuake.Rendering.Environment
                 var leaf = ( MemoryLeaf ) ( System.Object ) node;
 
                 // grab an efrag off the free list
-                var ef = _host.Client.cl.free_efrags;
+                var ef = _clientState.Data.free_efrags;
                 if ( ef == null )
                 {
-                    _host.Console.Print( "Too many efrags!\n" );
+                    _logger.Print( "Too many efrags!\n" );
                     return;	// no free fragments...
                 }
-                _host.Client.cl.free_efrags = _host.Client.cl.free_efrags.entnext;
+                _clientState.Data.free_efrags = _clientState.Data.free_efrags.entnext;
 
                 ef.entity = _AddEnt;
 
@@ -462,12 +479,12 @@ namespace SharpQuake.Rendering.Environment
                     case ModelType.Alias:
                     case ModelType.Brush:
                     case ModelType.Sprite:
-                        if ( ( pent.visframe != _host.RenderContext.World.Lighting.FrameCount ) && ( _host.Client.NumVisEdicts < ClientDef.MAX_VISEDICTS ) )
+                        if ( ( pent.visframe != _renderer.World.Lighting.FrameCount ) && ( _clientState.NumVisEdicts < ClientDef.MAX_VISEDICTS ) )
                         {
-                            _host.Client.VisEdicts[_host.Client.NumVisEdicts++] = pent;
+                            _clientState.VisEdicts[_clientState.NumVisEdicts++] = pent;
 
                             // mark that we've recorded this entity for this frame
-                            pent.visframe = _host.RenderContext.World.Lighting.FrameCount;
+                            pent.visframe = _renderer.World.Lighting.FrameCount;
                         }
 
                         ef = ef.leafnext;
@@ -511,8 +528,8 @@ namespace SharpQuake.Rendering.Environment
                 ef = ef.entnext;
 
                 // put it on the free list
-                old.entnext = _host.Client.cl.free_efrags;
-                _host.Client.cl.free_efrags = old;
+                old.entnext = _clientState.Data.free_efrags;
+                _clientState.Data.free_efrags = old;
             }
 
             ent.efrag = null;

@@ -22,27 +22,18 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Framework;
+using SharpQuake.Framework.Logging;
 using System;
 using System.Net;
 using System.Net.Sockets;
-using SharpQuake.Framework;
 
 namespace SharpQuake
 {
     public class net_tcp_ip : INetLanDriver, IDisposable
     {
-        public static net_tcp_ip Instance
-        {
-            get
-            {
-                return _Singletone;
-            }
-        }
-
         private const Int32 WSAEWOULDBLOCK = 10035;
         private const Int32 WSAECONNREFUSED = 10061;
-
-        private static net_tcp_ip _Singletone = new net_tcp_ip();
 
         private Boolean _IsInitialised;
         private IPAddress _MyAddress; // unsigned long myAddr
@@ -50,10 +41,6 @@ namespace SharpQuake
         private Socket _BroadcastSocket; // net_broadcastsocket
         private EndPoint _BroadcastAddress; // qsockaddr broadcastaddr
         private Socket _AcceptSocket; // net_acceptsocket
-
-        private net_tcp_ip()
-        {
-        }
 
         #region INetLanDriver Members
 
@@ -105,6 +92,13 @@ namespace SharpQuake
             set;
         }
 
+        private readonly IConsoleLogger _logger;
+
+        public net_tcp_ip( IConsoleLogger logger )
+        {
+            _logger = logger;
+        }
+
         /// <summary>
         /// UDP_Init
         /// </summary>
@@ -112,24 +106,24 @@ namespace SharpQuake
         {
             _IsInitialised = false;
 
-            if( CommandLine.HasParam( "-noudp" ) )
+            if ( CommandLine.HasParam( "-noudp" ) )
                 return false;
 
             try
             {
-                MachineName = Dns.GetHostName();
+                MachineName = Dns.GetHostName( );
             }
-            catch( SocketException se )
+            catch ( SocketException se )
             {
-                ConsoleWrapper.DPrint( "Cannot get host name: {0}\n", se.Message );
+                _logger.DPrint( "Cannot get host name: {0}\n", se.Message );
                 return false;
             }
 
             // if the quake hostname isn't set, set it to the machine name
-            if( HostName == "UNNAMED" )
+            if ( HostName == "UNNAMED" )
             {
                 IPAddress addr;
-                if( !IPAddress.TryParse( MachineName, out addr ) )
+                if ( !IPAddress.TryParse( MachineName, out addr ) )
                 {
                     var i = MachineName.IndexOf( '.' );
                     if ( i != -1 )
@@ -143,12 +137,12 @@ namespace SharpQuake
             }
 
             var i2 = CommandLine.CheckParm( "-ip" );
-            if( i2 > 0 )
+            if ( i2 > 0 )
             {
-                if( i2 < CommandLine.Argc - 1 )
+                if ( i2 < CommandLine.Argc - 1 )
                 {
                     var ipaddr = CommandLine.Argv( i2 + 1 );
-                    if( !IPAddress.TryParse( ipaddr, out _MyAddress ) )
+                    if ( !IPAddress.TryParse( ipaddr, out _MyAddress ) )
                         Utilities.Error( "{0} is not a valid IP address!", ipaddr );
                     HostAddress = ipaddr;
                 }
@@ -166,20 +160,20 @@ namespace SharpQuake
 
             _ControlSocket = OpenSocket( 0 );
 
-            if( _ControlSocket == null )
+            if ( _ControlSocket == null )
             {
-                ConsoleWrapper.Print( "TCP/IP: Unable to open control socket\n" );
+                _logger.Print( "TCP/IP: Unable to open control socket\n" );
                 return false;
             }
-            
+
             _BroadcastAddress = new IPEndPoint( IPAddress.Broadcast, HostPort );
 
             _IsInitialised = true;
-            ConsoleWrapper.Print( "TCP/IP Initialized\n" );
+            _logger.Print( "TCP/IP Initialized\n" );
             return true;
         }
 
-        public void Dispose()
+        public void Dispose( )
         {
             Listen( false );
             CloseSocket( _ControlSocket );
@@ -191,12 +185,12 @@ namespace SharpQuake
         public void Listen( Boolean state )
         {
             // enable listening
-            if( state )
+            if ( state )
             {
-                if( _AcceptSocket == null )
+                if ( _AcceptSocket == null )
                 {
                     _AcceptSocket = OpenSocket( HostPort );
-                    if( _AcceptSocket == null )
+                    if ( _AcceptSocket == null )
                         Utilities.Error( "UDP_Listen: Unable to open accept socket\n" );
 
                 }
@@ -204,7 +198,7 @@ namespace SharpQuake
             else
             {
                 // disable listening
-                if( _AcceptSocket != null )
+                if ( _AcceptSocket != null )
                 {
                     CloseSocket( _AcceptSocket );
                     _AcceptSocket = null;
@@ -224,14 +218,14 @@ namespace SharpQuake
                 EndPoint ep = new IPEndPoint( _MyAddress, port );
                 result.Bind( ep );
             }
-            catch( Exception ex )
+            catch ( Exception ex )
             {
-                if( result != null )
+                if ( result != null )
                 {
-                    result.Close();
+                    result.Close( );
                     result = null;
                 }
-                ConsoleWrapper.Print( "Unable to create socket: " + ex.Message );
+                _logger.Print( "Unable to create socket: " + ex.Message );
             }
 
             return result;
@@ -239,10 +233,10 @@ namespace SharpQuake
 
         public Int32 CloseSocket( Socket socket )
         {
-            if( socket == _BroadcastSocket )
+            if ( socket == _BroadcastSocket )
                 _BroadcastSocket = null;
 
-            socket.Close();
+            socket.Close( );
             return 0;
         }
 
@@ -255,10 +249,10 @@ namespace SharpQuake
         {
             try
             {
-                var entry = Dns.GetHostEntry( ( (IPEndPoint)addr ).Address );
+                var entry = Dns.GetHostEntry( ( ( IPEndPoint ) addr ).Address );
                 return entry.HostName;
             }
-            catch( SocketException )
+            catch ( SocketException )
             {
             }
             return String.Empty;
@@ -272,27 +266,27 @@ namespace SharpQuake
                 var i = name.IndexOf( ':' );
                 String saddr;
                 var port = HostPort;
-                if( i != -1 )
+                if ( i != -1 )
                 {
                     saddr = name.Substring( 0, i );
                     Int32 p;
-                    if( Int32.TryParse( name.Substring( i + 1 ), out p ) )
+                    if ( Int32.TryParse( name.Substring( i + 1 ), out p ) )
                         port = p;
                 }
                 else
                     saddr = name;
 
-                if( IPAddress.TryParse( saddr, out addr ) )
+                if ( IPAddress.TryParse( saddr, out addr ) )
                 {
                     return new IPEndPoint( addr, port );
                 }
                 var entry = Dns.GetHostEntry( name );
-                foreach( var addr2 in entry.AddressList )
+                foreach ( var addr2 in entry.AddressList )
                 {
                     return new IPEndPoint( addr2, port );
                 }
             }
-            catch( SocketException )
+            catch ( SocketException )
             {
             }
             return null;
@@ -300,19 +294,19 @@ namespace SharpQuake
 
         public Int32 AddrCompare( EndPoint addr1, EndPoint addr2 )
         {
-            if( addr1.AddressFamily != addr2.AddressFamily )
+            if ( addr1.AddressFamily != addr2.AddressFamily )
                 return -1;
 
             var ep1 = addr1 as IPEndPoint;
             var ep2 = addr2 as IPEndPoint;
 
-            if( ep1 == null || ep2 == null )
+            if ( ep1 == null || ep2 == null )
                 return -1;
 
-            if( !ep1.Address.Equals( ep2.Address ) )
+            if ( !ep1.Address.Equals( ep2.Address ) )
                 return -1;
 
-            if( ep1.Port != ep2.Port )
+            if ( ep1.Port != ep2.Port )
                 return 1;
 
             return 0;
@@ -320,21 +314,21 @@ namespace SharpQuake
 
         public Int32 GetSocketPort( EndPoint addr )
         {
-            return ( (IPEndPoint)addr ).Port;
+            return ( ( IPEndPoint ) addr ).Port;
         }
 
         public Int32 SetSocketPort( EndPoint addr, Int32 port )
         {
-            ( (IPEndPoint)addr ).Port = port;
+            ( ( IPEndPoint ) addr ).Port = port;
             return 0;
         }
 
-        public Socket CheckNewConnections()
+        public Socket CheckNewConnections( )
         {
-            if( _AcceptSocket == null )
+            if ( _AcceptSocket == null )
                 return null;
 
-            if( _AcceptSocket.Available > 0 )
+            if ( _AcceptSocket.Available > 0 )
                 return _AcceptSocket;
 
             return null;
@@ -347,9 +341,9 @@ namespace SharpQuake
             {
                 ret = socket.ReceiveFrom( buf, len, SocketFlags.None, ref ep );
             }
-            catch( SocketException se )
+            catch ( SocketException se )
             {
-                if( se.ErrorCode == WSAEWOULDBLOCK || se.ErrorCode == WSAECONNREFUSED )
+                if ( se.ErrorCode == WSAEWOULDBLOCK || se.ErrorCode == WSAECONNREFUSED )
                     ret = 0;
                 else
                     ret = -1;
@@ -364,9 +358,9 @@ namespace SharpQuake
             {
                 ret = socket.SendTo( buf, len, SocketFlags.None, ep );
             }
-            catch( SocketException se )
+            catch ( SocketException se )
             {
-                if( se.ErrorCode == WSAEWOULDBLOCK )
+                if ( se.ErrorCode == WSAEWOULDBLOCK )
                     ret = 0;
                 else
                     ret = -1;
@@ -376,17 +370,17 @@ namespace SharpQuake
 
         public Int32 Broadcast( Socket socket, Byte[] buf, Int32 len )
         {
-            if( socket != _BroadcastSocket )
+            if ( socket != _BroadcastSocket )
             {
-                if( _BroadcastSocket != null )
+                if ( _BroadcastSocket != null )
                     Utilities.Error( "Attempted to use multiple broadcasts sockets\n" );
                 try
                 {
                     socket.EnableBroadcast = true;
                 }
-                catch( SocketException se )
+                catch ( SocketException se )
                 {
-                    ConsoleWrapper.Print( "Unable to make socket broadcast capable: {0}\n", se.Message );
+                    _logger.Print( "Unable to make socket broadcast capable: {0}\n", se.Message );
                     return -1;
                 }
             }

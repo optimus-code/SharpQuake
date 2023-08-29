@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,8 +22,13 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories.Rendering;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Game.World;
+using SharpQuake.Logging;
+using SharpQuake.Networking.Client;
 using SharpQuake.Renderer;
+using SharpQuake.Rendering.Cameras;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -67,22 +72,38 @@ namespace SharpQuake.Rendering.Environment
             private set;
         }
 
-        private readonly Host _host;
+        private readonly IConsoleLogger _logger;
+        private readonly Vid _video;
+        private readonly ClientState _clientState;
+        private readonly Drawer _drawer;
+        private readonly render _renderer;
+        private readonly View _view;
+        private readonly ChaseView _chaseView;
+        private readonly ModelFactory _models;
 
-        public World( Host host ) 
-        { 
-            _host = host;
+        public World( IConsoleLogger logger, Vid video, VideoState videoState, ClientState clientState, Drawer drawer, 
+            render renderer, View view, ModelFactory models, IGameRenderer gameRenderer,
+            RenderState renderState ) 
+        {
+            _logger = logger;
+            _video = video;
+            _clientState = clientState;
+            _drawer = drawer;
+            _renderer = renderer;
+            _view = view;
+            _chaseView = _view.ChaseView;
+            _models = models;
 
-            Sky = new Sky( host );
-            Lighting = new Lighting( host );
+            Sky = new Sky( _clientState );
+            Lighting = new Lighting( _clientState, _drawer, _video, _renderer, _view, videoState );
             WorldEntity = new Entity( );
-            Particles = new ParticleSystem( _host.Video.Device );
-            Entities = new Entities( host );
+            Particles = new ParticleSystem( _video.Device );
+            Entities = new Entities( _logger, _clientState, _renderer, _video, _drawer, _chaseView, _models, gameRenderer, renderState );
         }
 
         public void Initialise( TextureChains textureChains )
         {
-            Occlusion = new Occlusion( _host, textureChains );
+            Occlusion = new Occlusion( _clientState, textureChains );
         }
 
         /// <summary>
@@ -93,12 +114,12 @@ namespace SharpQuake.Rendering.Environment
             Lighting.Reset( );
 
             WorldEntity.Clear( );
-            WorldEntity.model = _host.Client.cl.worldmodel;
+            WorldEntity.model = _clientState.Data.worldmodel;
 
             // clear out efrags in case the level hasn't been reloaded
             // FIXME: is this one short?
-            for ( var i = 0; i < _host.Client.cl.worldmodel.NumLeafs; i++ )
-                _host.Client.cl.worldmodel.Leaves[i].efrags = null;
+            for ( var i = 0; i < _clientState.Data.worldmodel.NumLeafs; i++ )
+                _clientState.Data.worldmodel.Leaves[i].efrags = null;
 
             Occlusion.ViewLeaf = null;
             Particles.Clear( );

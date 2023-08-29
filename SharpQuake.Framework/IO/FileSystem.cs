@@ -22,12 +22,15 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Framework.IO.FileHandlers;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 
 namespace SharpQuake.Framework.IO
@@ -51,9 +54,12 @@ namespace SharpQuake.Framework.IO
             }
         }
 
+        static FileHandlerService _files;
+
         static FileSystem( )
         {
             _SearchPaths = new List<SearchPath>( );
+            _files = new FileHandlerService( );
         }
 
         // COM_InitFilesystem
@@ -145,6 +151,8 @@ namespace SharpQuake.Framework.IO
                     _SearchPaths.Insert( 0, new SearchPath( CommandLine._Argv[i] ) );
                 }
             }
+
+            //IndexFiles( );
         }
 
         // COM_AddGameDirectory
@@ -153,6 +161,14 @@ namespace SharpQuake.Framework.IO
         // then loads and adds pak1.pak pak2.pak ...
         private static void AddGameDirectory( String dir )
         {
+            var sw = Stopwatch.StartNew( );
+
+            _files.AddGameDirectory( dir.Replace( "/", "\\" ) );
+
+            var newCodeTime = sw.Elapsed;
+
+            sw.Restart( );
+
             _GameDir = dir;
 
             //
@@ -163,6 +179,7 @@ namespace SharpQuake.Framework.IO
             //
             // add any pak files in the format pak0.pak pak1.pak, ...
             //
+
             for ( var i = 0; ; i++ )
             {
                 var pakfile = String.Format( "{0}/PAK{1}.PAK", dir, i );
@@ -172,6 +189,11 @@ namespace SharpQuake.Framework.IO
 
                 _SearchPaths.Insert( 0, new SearchPath( pak ) );
             }
+            //sw.Stop( );
+
+            //ConsoleWrapper.DPrint( "Loading PAK files took: {0}s\n", sw.Elapsed.Seconds );
+
+            //sw.Restart( );
 
             //
             // add any pk3 files in the format pak0.pk3 pak1.pk3, ...
@@ -189,9 +211,14 @@ namespace SharpQuake.Framework.IO
                     if ( pk3 == null )
                         break;
 
-                    _SearchPaths.Insert( 0, new SearchPath( pk3 ) );
+                    _SearchPaths.Insert( 0, new SearchPath( pk3file, pk3 ) );
                 }
             }
+
+            sw.Stop( );
+
+            var oldCodeTime = sw.Elapsed;
+            //ConsoleWrapper.DPrint( "Loading PK3 files took: {0}s\n", sw.Elapsed.Seconds );
         }
 
         // COM_Path_f
@@ -268,6 +295,14 @@ namespace SharpQuake.Framework.IO
         /// <returns></returns>
         public static SearchResult[] Search( String filename )
         {
+            var sw = Stopwatch.StartNew();
+            var newResults = _files.Search( filename );
+            sw.Stop( );
+
+            var newTime = sw.Elapsed;
+
+            sw.Restart( );
+
             var results = new List<SearchResult>();
             var cachepath = String.Empty;
             var searchCriteria = filename;
@@ -324,133 +359,301 @@ namespace SharpQuake.Framework.IO
                 }
             }
 
+            sw.Stop( );
+
+            var oldTime = sw.Elapsed;
+
             return results.ToArray();
         }
+
+        public static void Tick()
+        {
+            _files?.Tick( );
+        }
+        // TODO- Determine if indexing could be faster?
+        //class IndexedFile
+        //{
+        //    public String FileName
+        //    {
+        //        get;
+        //        set;
+        //    }
+
+        //    public String LocalPath
+        //    {
+        //        get;
+        //        set;
+        //    }
+
+        //    public Pak PakArchive
+        //    {
+        //        get;
+        //        set;
+        //    }
+
+        //    public String PK3ArchiveFileName
+        //    {
+        //        get;
+        //        set;
+        //    }
+
+        //    public ZipArchive PK3Archive
+        //    {
+        //        get;
+        //        set;
+        //    }
+        //}
+
+        //static Dictionary<String, IndexedFile> FilesIndex = new Dictionary<String, IndexedFile>( 1000 );
+
+        //private static void IndexFiles()
+        //{
+        //    var cachepath = String.Empty;
+
+        //    foreach ( var sp in _SearchPaths )
+        //    {
+        //        // is the element a pak file?
+        //        if ( sp.pack != null )
+        //        {
+        //            // look through all the pak file elements
+        //            var pak = sp.pack;
+        //            foreach ( var pfile in pak.files )
+        //            {
+        //                var fileName = pfile.name;
+
+        //                if ( !Path.HasExtension( fileName ) )
+        //                    continue;
+
+        //                if ( !FilesIndex.ContainsKey( fileName ) )
+        //                    FilesIndex.Add( fileName, new IndexedFile { FileName = fileName, PakArchive = pak } );
+        //            }
+        //        }
+        //        else if ( sp.pk3 != null ) // is the element a pk3 file?
+        //        {
+        //            // look through all the pak file elements
+        //            var pk3 = sp.pk3;
+
+        //            foreach ( var pfile in pk3.Entries )
+        //            {
+        //                var fileName = pfile.FullName;
+
+        //                if ( !Path.HasExtension( fileName ) )
+        //                    continue;
+
+        //                if ( !FilesIndex.ContainsKey( fileName ) )
+        //                    FilesIndex.Add( fileName, new IndexedFile { FileName = fileName, PK3Archive = pk3, PK3ArchiveFileName = sp.pk3filename  } );
+        //            }
+        //        }
+        //        else
+        //        {
+        //            var path = sp.filename.Replace( "/", "\\" );
+
+        //            foreach ( var file in Directory.GetFiles( path, "*.*", SearchOption.AllDirectories ) )
+        //            {
+        //                var fileName = file.Replace( path + "\\", "" );
+
+        //                if ( !FilesIndex.ContainsKey( fileName ) )
+        //                    FilesIndex.Add( fileName, new IndexedFile { FileName = fileName, LocalPath = path } );
+        //            }
+        //            //var netpath = sp.filename + "/" + filename;  //sprintf (netpath, "%s/%s",search->filename, filename);
+        //            //var findtime = GetFileTime( netpath );
+        //            //if ( findtime == DateTime.MinValue )
+        //            //    continue;
+
+        //            //// see if the file needs to be updated in the cache
+        //            //if ( String.IsNullOrEmpty( _CacheDir ) )// !com_cachedir[0])
+        //            //{
+        //            //    cachepath = netpath; //  strcpy(cachepath, netpath);
+        //            //}
+        //            //else
+        //            //{
+        //            //    if ( Utilities.IsWindows )
+        //            //    {
+        //            //        if ( netpath.Length < 2 || netpath[1] != ':' )
+        //            //            cachepath = _CacheDir + netpath;
+        //            //        else
+        //            //            cachepath = _CacheDir + netpath.Substring( 2 );
+        //            //    }
+        //            //    else
+        //            //    {
+        //            //        cachepath = _CacheDir + netpath;
+        //            //    }
+
+        //            //    var cachetime = GetFileTime( cachepath );
+        //            //    if ( cachetime < findtime )
+        //            //        CopyFile( netpath, cachepath );
+        //            //    netpath = cachepath;
+        //            //}
+
+        //            //ConsoleWrapper.DPrint( "FindFile: {0}\n", Path.GetFileName( netpath ) );
+        //            //var fs = OpenRead( netpath );
+        //            //if ( fs == null )
+        //            //{
+        //            //    file = null;
+        //            //    return -1;
+        //            //}
+        //            //file = new DisposableWrapper<BinaryReader>( new BinaryReader( fs, Encoding.ASCII ), true );
+
+        //            //return ( Int32 ) fs.Length;
+        //        }
+        //    }
+        //}
 
         /// <summary>
         /// COM_FindFile
         /// Finds the file in the search path.
         /// </summary>
-        private static Int32 FindFile( String filename, out DisposableWrapper<BinaryReader> file, Boolean duplicateStream )
+        private static IArchiveEntryReader FindFile( String filename, out DisposableWrapper<BinaryReader> file, Boolean duplicateStream )
         {
             file = null;
 
-            var isWildcardSearch = filename.StartsWith( "*." );
-            var wildcardFilter = isWildcardSearch ? Path.GetExtension( filename ) : null;
 
-            var cachepath = String.Empty;
+            var result = _files.FindFile( filename, out file );
 
-            //
-            // search through the path, one element at a time
-            //
-            foreach ( var sp in _SearchPaths )
-            {
-                // is the element a pak file?
-                if ( sp.pack != null )
-                {
-                    // look through all the pak file elements
-                    var pak = sp.pack;
-                    foreach ( var pfile in pak.files )
-                    {
-                        if ( pfile.name.Equals( filename ) )
-                        {
-                            // found it!
-                            ConsoleWrapper.DPrint( "PackFile: {0} : {1}\n", sp.pack.filename, filename );
-                            if ( duplicateStream )
-                            {
-                                var pfs = ( FileStream ) pak.stream.BaseStream;
-                                var fs = new FileStream( pfs.Name, FileMode.Open, FileAccess.Read, FileShare.Read );
-                                file = new DisposableWrapper<BinaryReader>( new BinaryReader( fs, Encoding.ASCII ), true );
-                            }
-                            else
-                            {
-                                file = new DisposableWrapper<BinaryReader>( pak.stream, false );
-                            }
+            if ( result == null )
+                return null;
 
-                            file.Object.BaseStream.Seek( pfile.filepos, SeekOrigin.Begin );
-                            return pfile.filelen;
-                        }
-                    }
-                }
-                else if ( sp.pk3 != null ) // is the element a pk3 file?
-                {
-                    // look through all the pak file elements
-                    var pk3 = sp.pk3;
+            return result;
 
-                    foreach ( var pfile in pk3.Entries )
-                    {
-                        if ( pfile.FullName.Equals( filename ) )
-                        {
-                            // found it!
-                            ConsoleWrapper.DPrint( "PK3File: {0} : {1}\n", sp.pk3filename, filename );
+            //var sw = Stopwatch.StartNew();
+            //sw.Stop( );
 
-                            file = new DisposableWrapper<BinaryReader>( new BinaryReader( pfile.Open( ), Encoding.ASCII ), false );
+            //var newTime = sw.Elapsed;
 
-                            return ( Int32 ) pfile.Length;
-                        }
-                    }
-                }
-                else
-                {
-                    // check a file in the directory tree
-                    if ( !_StaticRegistered )
-                    {
-                        // if not a registered version, don't ever go beyond base
-                        if ( filename.IndexOfAny( _Slashes ) != -1 ) // strchr (filename, '/') || strchr (filename,'\\'))
-                            continue;
-                    }
+            //sw.Restart( );
 
-                    var netpath = sp.filename + "/" + filename;  //sprintf (netpath, "%s/%s",search->filename, filename);
-                    var findtime = GetFileTime( netpath );
-                    if ( findtime == DateTime.MinValue )
-                        continue;
+            //var isWildcardSearch = filename.StartsWith( "*." );
+            //var wildcardFilter = isWildcardSearch ? Path.GetExtension( filename ) : null;
 
-                    // see if the file needs to be updated in the cache
-                    if ( String.IsNullOrEmpty( _CacheDir ) )// !com_cachedir[0])
-                    {
-                        cachepath = netpath; //  strcpy(cachepath, netpath);
-                    }
-                    else
-                    {
-                        if ( Utilities.IsWindows )
-                        {
-                            if ( netpath.Length < 2 || netpath[1] != ':' )
-                                cachepath = _CacheDir + netpath;
-                            else
-                                cachepath = _CacheDir + netpath.Substring( 2 );
-                        }
-                        else
-                        {
-                            cachepath = _CacheDir + netpath;
-                        }
+            //TimeSpan oldTime = TimeSpan.Zero;
+            //var cachepath = String.Empty;
+            ////
+            //// search through the path, one element at a time
+            ////
+            //foreach ( var sp in _SearchPaths )
+            //{
+            //    // is the element a pak file?
+            //    if ( sp.pack != null )
+            //    {
+            //        // look through all the pak file elements
+            //        var pak = sp.pack;
+            //        foreach ( var pfile in pak.files )
+            //        {
+            //            if ( pfile.name.Equals( filename ) )
+            //            {
+            //                // found it!
+            //                ConsoleWrapper.DPrint( "^9PackFile: ^0{0}^9 : ^0{1}^9\n", Path.GetFileName( sp.pack.filename ), filename );
+            //                if ( duplicateStream )
+            //                {
+            //                    var pfs = ( FileStream ) pak.stream.BaseStream;
+            //                    var fs = new FileStream( pfs.Name, FileMode.Open, FileAccess.Read, FileShare.Read );
+            //                    file = new DisposableWrapper<BinaryReader>( new BinaryReader( fs, Encoding.ASCII ), true );
+            //                }
+            //                else
+            //                {
+            //                    file = new DisposableWrapper<BinaryReader>( pak.stream, false );
+            //                }
 
-                        var cachetime = GetFileTime( cachepath );
-                        if ( cachetime < findtime )
-                            CopyFile( netpath, cachepath );
-                        netpath = cachepath;
-                    }
+            //                file.Object.BaseStream.Seek( pfile.filepos, SeekOrigin.Begin );
 
-                    ConsoleWrapper.DPrint( "FindFile: {0}\n", netpath );
-                    var fs = OpenRead( netpath );
-                    if ( fs == null )
-                    {
-                        file = null;
-                        return -1;
-                    }
-                    file = new DisposableWrapper<BinaryReader>( new BinaryReader( fs, Encoding.ASCII ), true );
-                    return ( Int32 ) fs.Length;
-                }
-            }
+            //                sw.Stop( );
+            //                oldTime = sw.Elapsed;
+            //                return pfile.filelen;
+            //            }
+            //        }
+            //    }
+            //    else if ( sp.pk3 != null ) // is the element a pk3 file?
+            //    {
+            //        // look through all the pak file elements
+            //        var pk3 = sp.pk3;
 
-            ConsoleWrapper.DPrint( "FindFile: can't find {0}\n", filename );
-            return -1;
+            //        foreach ( var pfile in pk3.Entries )
+            //        {
+            //            if ( pfile.FullName.Equals( filename ) )
+            //            {
+            //                // found it!
+            //                ConsoleWrapper.DPrint( "PK3File: ^0{0}^9 : ^0{1}\n", Path.GetFileName( sp.pk3filename ), filename );
+
+            //                file = new DisposableWrapper<BinaryReader>( new BinaryReader( pfile.Open( ), Encoding.ASCII ), false );
+
+            //                sw.Stop( );
+            //                oldTime = sw.Elapsed;
+            //                return ( Int32 ) pfile.Length;
+            //            }
+            //        }
+            //    }
+            //    else
+            //    {
+            //        // check a file in the directory tree
+            //        if ( !_StaticRegistered )
+            //        {
+            //            // if not a registered version, don't ever go beyond base
+            //            if ( filename.IndexOfAny( _Slashes ) != -1 ) // strchr (filename, '/') || strchr (filename,'\\'))
+            //                continue;
+            //        }
+
+            //        var netpath = sp.filename + "/" + filename;  //sprintf (netpath, "%s/%s",search->filename, filename);
+            //        var findtime = GetFileTime( netpath );
+            //        if ( findtime == DateTime.MinValue )
+            //            continue;
+
+            //        // see if the file needs to be updated in the cache
+            //        if ( String.IsNullOrEmpty( _CacheDir ) )// !com_cachedir[0])
+            //        {
+            //            cachepath = netpath; //  strcpy(cachepath, netpath);
+            //        }
+            //        else
+            //        {
+            //            if ( Utilities.IsWindows )
+            //            {
+            //                if ( netpath.Length < 2 || netpath[1] != ':' )
+            //                    cachepath = _CacheDir + netpath;
+            //                else
+            //                    cachepath = _CacheDir + netpath.Substring( 2 );
+            //            }
+            //            else
+            //            {
+            //                cachepath = _CacheDir + netpath;
+            //            }
+
+            //            var cachetime = GetFileTime( cachepath );
+            //            if ( cachetime < findtime )
+            //                CopyFile( netpath, cachepath );
+            //            netpath = cachepath;
+            //        }
+
+            //        ConsoleWrapper.DPrint( "FindFile: {0}\n", Path.GetFileName( netpath ) );
+            //        var fs = OpenRead( netpath );
+            //        if ( fs == null )
+            //        {
+            //            file = null;
+            //            sw.Stop( );
+            //            oldTime = sw.Elapsed;
+            //            return -1;
+            //        }
+            //        file = new DisposableWrapper<BinaryReader>( new BinaryReader( fs, Encoding.ASCII ), true );
+
+            //        sw.Stop( );
+            //        oldTime = sw.Elapsed;
+
+            //        return ( Int32 ) fs.Length;
+            //    }
+            //}
+
+            //ConsoleWrapper.DPrint( "FindFile: can't find {0}\n", filename );
+
+            //sw.Stop( );
+            //oldTime = sw.Elapsed;
+
+            //return -1;
         }
+
 
         // COM_OpenFile(char* filename, int* hndl)
         // filename never has a leading slash, but may ConsoleWrappertain directory walks
         // returns a handle and a length
         // it may actually be inside a pak file
-        private static Int32 OpenFile( String filename, out DisposableWrapper<BinaryReader> file )
+        private static IArchiveEntryReader OpenFile( String filename, out DisposableWrapper<BinaryReader> file )
         {
             return FindFile( filename, out file, false );
         }
@@ -462,25 +665,32 @@ namespace SharpQuake.Framework.IO
         {
             // look for it in the filesystem or pack files
             DisposableWrapper<BinaryReader> file;
-            var length = OpenFile( path, out file );
-            if ( file == null )
+            var entry = OpenFile( path, out file );            
+
+            if ( entry == null || file == null )
                 return null;
 
-            var result = new Byte[length];
+            var result = new Byte[entry.Length];
             using ( file )
             {
                 //Drawer.BeginDisc( );
-                var left = length;
+                var left = entry.Length;
                 while ( left > 0 )
                 {
-                    var count = file.Object.Read( result, length - left, left );
+                    var count = file.Object.Read( result, ( Int32 ) ( entry.Length - left ), ( Int32 ) left );
                     if ( count == 0 )
                         Utilities.Error( "COM_LoadFile: reading failed!" );
                     left -= count;
                 }
-               // Drawer.EndDisc( );
+                // Drawer.EndDisc( );
             }
+
+            // This tells the new file handlers to passively dispose the streams
+            // to prevent slowdown of file loading routines
+            _files.QueueForCleanup( entry );
+
             return result;
+            
         }
 
         /// <summary>
@@ -491,6 +701,9 @@ namespace SharpQuake.Framework.IO
         /// </summary>
         public static Pak LoadPackFile( String packfile )
         {
+           // if ( !File.Exists( packfile ) )
+            //    return null;
+
             var file = OpenRead( packfile );
             if ( file == null )
                 return null;
@@ -570,7 +783,7 @@ namespace SharpQuake.Framework.IO
         // COM_FOpenFile(char* filename, FILE** file)
         // If the requested file is inside a packfile, a new FILE * will be opened
         // into the file.
-        public static Int32 FOpenFile( String filename, out DisposableWrapper<BinaryReader> file )
+        public static IArchiveEntryReader FOpenFile( String filename, out DisposableWrapper<BinaryReader> file )
         {
             return FindFile( filename, out file, true );
         }

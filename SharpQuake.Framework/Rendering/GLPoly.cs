@@ -38,6 +38,8 @@ namespace SharpQuake.Framework
         /// </summary>
         public Single[][] verts; //[4][VERTEXSIZE];	// variable sized (xyz s1t1 s2t2)
 
+        public Int32 FirstVertexIndex;
+
         public void Clear( )
         {
             next = null;

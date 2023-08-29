@@ -1,8 +1,10 @@
 
 using SharpQuake.Framework.IO.Sound;
+using SharpQuake.Framework.Logging;
+using SharpQuake.Logging;
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -37,19 +39,18 @@ namespace SharpQuake
             }
         }
 
-        public Host Host
+        private readonly snd _sound;
+
+        public NullSoundController( snd sound )
         {
-            get;
-            private set;
+            _sound = sound;
         }
 
-        public void Initialise( object host )
+        public void Initialise( )
         {
-            Host = ( Host ) host;
-
-            Host.Sound.shm.channels = 2;
-            Host.Sound.shm.samplebits = 16;
-            Host.Sound.shm.speed = 11025;
+            _sound.shm.channels = 2;
+            _sound.shm.samplebits = 16;
+            _sound.shm.speed = 11025;
         }
 
         public void Shutdown()
@@ -62,7 +63,7 @@ namespace SharpQuake
 
         public System.Byte[] LockBuffer()
         {
-            return Host.Sound.shm.buffer;
+            return _sound.shm.buffer;
         }
 
         public void UnlockBuffer( System.Int32 bytes )

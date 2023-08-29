@@ -39,7 +39,7 @@ namespace SharpQuake.Framework
             get;
         }
 
-        void Initialise( Object host );
+        void Initialise( );
 
         void Listen( Boolean state );
 

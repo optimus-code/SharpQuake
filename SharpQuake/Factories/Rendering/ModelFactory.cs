@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -27,9 +27,14 @@ using System.Collections.Generic;
 using System.Linq;
 using SharpQuake.Framework;
 using SharpQuake.Framework.Factories;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Framework.Factories.IO.WAD;
 using SharpQuake.Framework.IO;
+using SharpQuake.Framework.IO.WAD;
 using SharpQuake.Game.Data.Models;
+using SharpQuake.Game.Rendering.Textures;
 using SharpQuake.Renderer.Textures;
+using SharpQuake.Rendering;
 
 // gl_model.c -- model loading and caching
 
@@ -49,12 +54,6 @@ namespace SharpQuake.Factories.Rendering
             {
                 return _glSubDivideSize.Get<Int32>( );
             }
-        }
-
-        public Host Host
-        {
-            get;
-            private set;
         }
 
         private AliasModelBuilder AliasModelBuilder
@@ -87,18 +86,32 @@ namespace SharpQuake.Factories.Rendering
             set;
         }
 
+        private readonly ICache _cache;
+        private readonly ClientVariableFactory _cvars;
+        private readonly WadFactory _wads;
+        private readonly Vid _video;
+        private readonly IGameRenderer _gameRenderer;
+
+        public ModelFactory( ICache cache, WadFactory wads, ClientVariableFactory cvars, Vid video, IGameRenderer gameRenderer )
+        {
+            _cache = cache;
+            _cvars = cvars;
+            _wads = wads;
+            _video = video;
+            _gameRenderer = gameRenderer;
+        }
+
         /// <summary>
         /// Mod_Init
         /// </summary>
-        public void Initialise( Host host )
+        public void Initialise( )
         {
-            Host = host;
             SkinTextures = new List<BaseTexture>();
             SpriteTextures = new List<BaseTexture>();
             AliasModelBuilder = new AliasModelBuilder();
 
             if ( _glSubDivideSize == null )
-                _glSubDivideSize = Host.CVars.Add( "gl_subdivide_size", 128, ClientVariableFlags.Archive );
+                _glSubDivideSize = _cvars.Add( "gl_subdivide_size", 128, ClientVariableFlags.Archive );
         }
 
         /// <summary>
@@ -117,11 +130,11 @@ namespace SharpQuake.Factories.Rendering
         /// Mod_ForName
         /// Loads in a model for the given name
         /// </summary>
-        public ModelData ForName( String name, Boolean crash, ModelType type )
+        public ModelData ForName( String name, Boolean crash, ModelType type, Boolean isWorld )
         {
-            var mod = FindName( name, type );
+            var mod = FindName( name, type, isWorld );
 
-            return Load( mod, crash, type );
+            return Load( mod, crash, type, isWorld );
         }
 
         /// <summary>
@@ -130,12 +143,12 @@ namespace SharpQuake.Factories.Rendering
         /// </summary>
         public aliashdr_t GetExtraData( ModelData mod )
         {
-            var r = Host.Cache.Check( mod.cache );
+            var r = _cache.Check( mod.cache );
 
             if ( r != null )
                 return ( aliashdr_t ) r;
 
-            Load( mod, true, ModelType.Alias );
+            Load( mod, true, ModelType.Alias, false );
 
             if ( mod.cache.data == null )
                 Utilities.Error( "Mod_Extradata: caching failed" );
@@ -159,12 +172,12 @@ namespace SharpQuake.Factories.Rendering
             else
                 type = ModelType.Sprite;
 
-            var mod = FindName( name, type );
+            var mod = FindName( name, type, name.StartsWith( "maps/" ) && !name.StartsWith( "maps/b_" ) );
 
             if ( !mod.IsLoadRequired )
             {
                 if ( mod.Type == ModelType.Alias )
-                    Host.Cache.Check( mod.cache );
+                    _cache.Check( mod.cache );
             }
         } 
 
@@ -178,7 +191,7 @@ namespace SharpQuake.Factories.Rendering
         /// <summary>
         /// Mod_FindName
         /// </summary>
-        private ModelData FindName( String name, ModelType type )
+        private ModelData FindName( String name, ModelType type, Boolean isWorld )
         {
             ModelData result = null;
 
@@ -193,15 +206,15 @@ namespace SharpQuake.Factories.Rendering
                 switch ( type )
                 {
                     case ModelType.Brush:
-                        result = new BrushModelData( Host.Model.SubdivideSize, Host.RenderContext.NoTextureMip );
+                        result = new BrushModelData( _video.Device, SubdivideSize, _gameRenderer.NoTextureMip, isWorld );
                         break;
 
                     case ModelType.Sprite:
-                        result = new AliasModelData( Host.RenderContext.NoTextureMip );
+                        result = new AliasModelData( _gameRenderer.NoTextureMip );
                         break;
 
                     case ModelType.Alias:
-                        result = new SpriteModelData( Host.RenderContext.NoTextureMip );
+                        result = new SpriteModelData( _gameRenderer.NoTextureMip );
                         break;
                 }
 
@@ -219,7 +232,7 @@ namespace SharpQuake.Factories.Rendering
         /// Mod_LoadModel
         /// Loads a model into the cache
         /// </summary>
-        private ModelData Load( ModelData mod, Boolean crash, ModelType type )
+        private ModelData Load( ModelData mod, Boolean crash, ModelType type, Boolean isWorld )
         {
             var name = mod.Name;
 
@@ -230,17 +243,17 @@ namespace SharpQuake.Factories.Rendering
                 switch ( type )
                 {
                     case ModelType.Brush:
-                        newMod = new BrushModelData( Host.Model.SubdivideSize, Host.RenderContext.NoTextureMip );
+                        newMod = new BrushModelData( _video.Device, SubdivideSize, _gameRenderer.NoTextureMip, isWorld );
                         newMod.CopyFrom( mod );
                         break;
 
                     case ModelType.Alias:
-                        newMod = new AliasModelData( Host.RenderContext.NoTextureMip );
+                        newMod = new AliasModelData( _gameRenderer.NoTextureMip );
                         newMod.CopyFrom( mod );
                         break;
 
                     case ModelType.Sprite:
-                        newMod = new SpriteModelData( Host.RenderContext.NoTextureMip );
+                        newMod = new SpriteModelData( _gameRenderer.NoTextureMip );
                         newMod.CopyFrom( mod );
                         break;
                 }
@@ -258,7 +271,7 @@ namespace SharpQuake.Factories.Rendering
             {
                 if ( mod.Type == ModelType.Alias )
                 {
-                    if ( Host.Cache.Check( mod.cache ) != null )
+                    if ( _cache.Check( mod.cache ) != null )
                         return mod;
                 }
                 else
@@ -309,27 +322,31 @@ namespace SharpQuake.Factories.Rendering
         /// </summary>
         private void LoadAlias( AliasModelData mod, Byte[] buffer )
         {
-            mod.Load( Host.Video.Device.Palette.Table8to24, mod.Name, buffer, ( n, b, h ) => 
-            {
-                var texture = ( Renderer.OpenGL.Textures.GLTexture ) BaseTexture.FromBuffer( Host.Video.Device, n,
-                        b, h.skinwidth, h.skinheight, true, false );
+            mod.Load( _video.Device.Palette.Table8to24, mod.Name, buffer, LoadSkinTexture, LoadAliasModelDisplayLists );
+        }
 
-                SkinTextures.Add( texture );
+        private Int32 LoadSkinTexture( String name, ByteArraySegment buffer, aliashdr_t header )
+        {
+            var texture = ( Renderer.OpenGL.Textures.GLTexture ) BaseTexture.FromBuffer( _video.Device, name,
+                    buffer, header.skinwidth, header.skinheight, true, false );
 
-                return texture.GLDesc.TextureNumber;
-            }, ( model, header ) => 
-            {
-                // Build the draw lists
-                AliasModelBuilder.MakeDisplayLists( model );
+            SkinTextures.Add( texture );
 
-                // Move the complete, relocatable alias model to the cache
-                mod.cache = Host.Cache.Alloc( aliashdr_t.SizeInBytes * header.frames.Length * maliasframedesc_t.SizeInBytes, null );
+            return texture.GLDesc.TextureNumber;
+        }
 
-                if ( mod.cache == null )
-                    return;
+        private void LoadAliasModelDisplayLists( AliasModelData model, aliashdr_t header )
+        {
+            // Build the draw lists
+            AliasModelBuilder.MakeDisplayLists( model );
 
-                mod.cache.data = header;
-            } );
+            // Move the complete, relocatable alias model to the cache
+            model.cache = _cache.Alloc( aliashdr_t.SizeInBytes * header.frames.Length * maliasframedesc_t.SizeInBytes, null );
+
+            if ( model.cache == null )
+                return;
+
+            model.cache.data = header;
         }
 
         /// <summary>
@@ -337,15 +354,17 @@ namespace SharpQuake.Factories.Rendering
         /// </summary>
         private void LoadSprite( SpriteModelData mod, Byte[] buffer )
         {
-            mod.Load( mod.Name, buffer, ( name, buf, width, height ) =>
-            {
-                var texture = ( Renderer.OpenGL.Textures.GLTexture ) BaseTexture.FromBuffer( Host.Video.Device, name,
-                        buf, width, height, hasMipMap: true, hasAlpha: true );
+            mod.Load( mod.Name, buffer, LoadSpriteTexture );
+        }
 
-                SpriteTextures.Add( texture );
+        private Int32 LoadSpriteTexture( String name, ByteArraySegment buffer, Int32 width, Int32 height )
+        {
+            var texture = ( Renderer.OpenGL.Textures.GLTexture ) BaseTexture.FromBuffer( _video.Device, name,
+                    buffer, width, height, hasMipMap: true, hasAlpha: true );
 
-                return texture.GLDesc.TextureNumber;
-            } );
+            SpriteTextures.Add( texture );
+
+            return texture.GLDesc.TextureNumber;
         }
 
         /// <summary>
@@ -353,19 +372,7 @@ namespace SharpQuake.Factories.Rendering
         /// </summary>
         private void LoadBrush( BrushModelData mod, Byte[] buffer )
         {
-            mod.Load( mod.Name, buffer, ( tx ) => 
-            {
-                if ( tx.name != null && tx.name.StartsWith( "sky" ) )// !Q_strncmp(mt->name,"sky",3))
-                    Host.RenderContext.WarpableTextures.InitSky( tx );
-                else
-                {   
-                    tx.texture = BaseTexture.FromBuffer( Host.Video.Device, tx.name, new ByteArraySegment( tx.pixels ),
-                     ( Int32 ) tx.width, ( Int32 ) tx.height, true, true );
-                }
-            }, ( textureFile ) =>             
-            {
-                return Host.Wads.LoadTexture( textureFile );
-			} );
+            mod.Load( mod.Name, buffer, LoadBrushTexture, LoadWadTexture );
 
             //
             // set up the submodels (FIXME: this is confusing)
@@ -378,12 +385,32 @@ namespace SharpQuake.Factories.Rendering
                 {
                     // duplicate the basic information
                     var name = "*" + ( i + 1 ).ToString( );
-                    CurrentModel = FindName( name, ModelType.Brush );
+                    CurrentModel = FindName( name, ModelType.Brush, false );
                     CurrentModel.CopyFrom( mod ); // *loadmodel = *mod;
                     CurrentModel.Name = name; //strcpy (loadmodel->name, name);
                     mod = ( BrushModelData ) CurrentModel; //mod = loadmodel;
                 }
             }
+        }
+
+        private void LoadBrushTexture( ModelTexture tx )
+        {
+            if ( tx.name != null && tx.name.StartsWith( "sky" ) )// !Q_strncmp(mt->name,"sky",3))
+                _gameRenderer.WarpableTextures.InitSky( tx );
+            else
+            {
+                var diskVersion = BaseTexture.FromFile( _video.Device, "textures/" + tx.name + ".tga", true, false, ignorePool: true );
+
+                if ( diskVersion != null )
+                    tx.texture = diskVersion;
+                else
+                    tx.texture = BaseTexture.FromBuffer( _video.Device, tx.name, new ByteArraySegment( tx.pixels ), ( Int32 ) tx.width, ( Int32 ) tx.height, true, true );
+            }
+        }
+
+        private WadLumpBuffer LoadWadTexture( String textureFile )
+        {
+            return _wads.LoadTexture( textureFile );
         }
     }
 }

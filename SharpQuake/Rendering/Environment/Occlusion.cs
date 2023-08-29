@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -23,11 +23,12 @@
 /// </copyright>
 
 using SharpQuake.Framework;
-using SharpQuake.Framework.IO;
 using SharpQuake.Framework.IO.BSP;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Game.Rendering.Memory;
 using SharpQuake.Game.World;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.Environment
@@ -52,28 +53,24 @@ namespace SharpQuake.Rendering.Environment
 			set;
 		} // r_oldviewleaf
 
-		private Host Host
-		{
-			get;
-			set;
-		}
-
 		private TextureChains TextureChains
 		{
 			get;
 			set;
 		}
 
-		public Occlusion( Host host, TextureChains textureChains )
+		private readonly ClientState _clientState;
+
+		public Occlusion( ClientState clientState, TextureChains textureChains )
 		{
-			Host = host;
+			_clientState = clientState;
 			TextureChains = textureChains;
 		}
 
 		public void SetupFrame( ref Vector3 origin )
 		{
 			OldViewLeaf = ViewLeaf;
-			ViewLeaf = Host.Client.cl.worldmodel.PointInLeaf( ref origin );
+			ViewLeaf = _clientState.Data.worldmodel.PointInLeaf( ref origin );
 		}
 
 		/// <summary>
@@ -81,7 +78,7 @@ namespace SharpQuake.Rendering.Environment
 		/// </summary>
 		public void MarkLeaves( )
 		{
-			if ( OldViewLeaf == ViewLeaf && !Host.Cvars.NoVis.Get<Boolean>() )
+			if ( OldViewLeaf == ViewLeaf && !Cvars.NoVis.Get<Boolean>() )
 				return;
 
 			//if( _IsMirror )
@@ -91,16 +88,16 @@ namespace SharpQuake.Rendering.Environment
 			OldViewLeaf = ViewLeaf;
 
 			Byte[] vis;
-			if ( Host.Cvars.NoVis.Get<Boolean>() )
+			if ( Cvars.NoVis.Get<Boolean>() )
 			{
 				vis = new Byte[4096];
 				Utilities.FillArray<Byte>( vis, 0xff ); // todo: add count parameter?
 														//memset(solid, 0xff, (cl.worldmodel->numleafs + 7) >> 3);
 			}
 			else
-				vis = Host.Client.cl.worldmodel.LeafPVS( ViewLeaf );
+				vis = _clientState.Data.worldmodel.LeafPVS( ViewLeaf );
 
-			var world = Host.Client.cl.worldmodel;
+			var world = _clientState.Data.worldmodel;
 			for ( var i = 0; i < world.NumLeafs; i++ )
 			{
 				if ( vis[i >> 3] != 0 & ( 1 << ( i & 7 ) ) != 0 )
@@ -194,7 +191,7 @@ namespace SharpQuake.Rendering.Environment
 
 			if ( c != 0 )
 			{
-				var surf = Host.Client.cl.worldmodel.Surfaces;
+				var surf = _clientState.Data.worldmodel.Surfaces;
 				Int32 offset = n.firstsurface;
 
 				if ( dot < 0 - QDef.BACKFACE_EPSILON )
@@ -212,9 +209,9 @@ namespace SharpQuake.Rendering.Environment
 						continue;       // wrong side
 
 					// if sorting by texture, just store it out
-					if ( Host.Cvars.glTexSort.Get<Boolean>() )
+					if ( Cvars.glTexSort.Get<Boolean>() )
 					{
-						//if( !_IsMirror || surf[offset].texinfo.texture != Host.Client.cl.worldmodel.textures[_MirrorTextureNum] )
+						//if( !_IsMirror || surf[offset].texinfo.texture != _client.cl.worldmodel.textures[_MirrorTextureNum] )
 						//{
 						surf[offset].texturechain = surf[offset].texinfo.texture.texturechain;
 						surf[offset].texinfo.texture.texturechain = surf[offset];

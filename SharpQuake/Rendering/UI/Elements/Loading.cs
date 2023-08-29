@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,6 +22,9 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
+using SharpQuake.Factories;
+using SharpQuake.Factories.Rendering.UI;
+using SharpQuake.Sys;
 using System;
 
 namespace SharpQuake.Rendering.UI.Elements
@@ -34,9 +37,15 @@ namespace SharpQuake.Rendering.UI.Elements
             set;
         } = false;
 
-        public Loading( Host host ) : base( host )
+        private readonly Vid _video;
+        private readonly VideoState _videoState;
+        private readonly PictureFactory _pictures;
+
+        public Loading( Vid video, VideoState videoState, PictureFactory pictures )
         {
-            HasInitialised = true;
+            _video = video;
+            _videoState = videoState;
+            _pictures = pictures;
         }
 
         /// <summary>
@@ -49,8 +58,8 @@ namespace SharpQuake.Rendering.UI.Elements
             if ( !IsVisible || !HasInitialised )
                 return;
 
-            var pic = _host.Pictures.Cache( "gfx/loading.lmp", "GL_LINEAR" );
-            _host.Video.Device.Graphics.DrawPicture( pic, ( _host.Screen.vid.width - pic.Width ) / 2, ( _host.Screen.vid.height - 48 - pic.Height ) / 2 );
+            var pic = _pictures.Cache( "gfx/loading.lmp", "GL_LINEAR" );
+            _video.Device.Graphics.DrawPicture( pic, ( _videoState.Data.width - pic.Width ) / 2, ( _videoState.Data.height - 48 - pic.Height ) / 2 );
         }
     }
 }

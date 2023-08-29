@@ -57,8 +57,6 @@ namespace SharpQuake.Game.Networking.Server
         public Int32 max_edicts;
         public MemoryEdict[] edicts;        // can NOT be array indexed, because
 
-        // edict_t is variable sized, but can
-        // be used to reference the world ent
         public server_state_t state;			// some actions are only valid during load
 
         public MessageWriter datagram;

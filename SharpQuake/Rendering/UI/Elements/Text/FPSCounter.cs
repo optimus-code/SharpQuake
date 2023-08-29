@@ -1,6 +1,6 @@
 ﻿/// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -24,6 +24,7 @@
 
 using SharpQuake.Framework.IO.Input;
 using SharpQuake.Framework.Rendering.UI;
+using SharpQuake.Sys;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -50,9 +51,13 @@ namespace SharpQuake.Rendering.UI.Elements.Text
             set;
         }
 
-        public FPSCounter( Host host ) : base( host )
+        private readonly VideoState _videoState;
+        private readonly Drawer _drawer;
+
+        public FPSCounter( VideoState videoState, Drawer drawer )
         {
-            HasInitialised = true;
+            _videoState = videoState;
+            _drawer = drawer;
         }
 
         // Not applicable to this component
@@ -76,7 +81,7 @@ namespace SharpQuake.Rendering.UI.Elements.Text
 
             FrameCount++;
 
-            _host.DrawingContext.DrawString( _host.Screen.vid.width - 16 - 10, 10, $"{FPS}", System.Drawing.Color.Yellow );
+            _drawer.DrawString( _videoState.Data.width - 16 - 10, 10, $"{FPS}", false, System.Drawing.Color.Yellow );
         }
     }
 }

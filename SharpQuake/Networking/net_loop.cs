@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -22,13 +22,16 @@
 /// Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /// </copyright>
 
-using System;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Game.Client;
+using SharpQuake.Networking.Client;
+using SharpQuake.Networking.Server;
+using System;
 
 namespace SharpQuake
 {
-    internal class net_loop : INetDriver
+    public class net_loop : INetDriver
     {
         private Boolean _IsInitialised;
         private Boolean _LocalConnectPending; // localconnectpending
@@ -53,18 +56,22 @@ namespace SharpQuake
             }
         }
 
-        // CHANGE
-        private Host Host
+        private readonly IConsoleLogger _logger;
+        private readonly ClientState _clientState;
+        private readonly ServerState _serverState;
+        private readonly Network _network;
+
+        public net_loop( IConsoleLogger logger, ClientState clientState, ServerState serverState, Network network )
         {
-            get;
-            set;
+            _logger = logger;
+            _clientState = clientState;
+            _serverState = serverState;
+            _network = network;
         }
 
-        public void Initialise( Object host )
+        public void Initialise( )
         {
-            Host = ( Host ) host;
-
-            if( Host.Client.cls.state == cactive_t.ca_dedicated )
+            if ( _clientState.StaticData.state == cactive_t.ca_dedicated )
                 return;// -1;
 
             _IsInitialised = true;
@@ -77,53 +84,54 @@ namespace SharpQuake
 
         public void SearchForHosts( Boolean xmit )
         {
-            if( !Host.Server.sv.active )
+            if ( !_serverState.Data.active )
                 return;
 
-            Host.Network.HostCacheCount = 1;
-            if( Host.Network.HostName == "UNNAMED" )
-                Host.Network.HostCache[0].name = "local";
+            _network.HostCacheCount = 1;
+            if ( _network.HostName == "UNNAMED" )
+                _network.HostCache[0].name = "local";
             else
-                Host.Network.HostCache[0].name = Host.Network.HostName;
+                _network.HostCache[0].name = _network.HostName;
 
-            Host.Network.HostCache[0].map = Host.Server.sv.name;
-            Host.Network.HostCache[0].users = Host.Network.ActiveConnections;
-            Host.Network.HostCache[0].maxusers = Host.Server.svs.maxclients;
-            Host.Network.HostCache[0].driver = Host.Network.DriverLevel;
-            Host.Network.HostCache[0].cname = "local";
+            _network.HostCache[0].map = _serverState.Data.name;
+            _network.HostCache[0].users = _network.ActiveConnections;
+            _network.HostCache[0].maxusers = _serverState.StaticData.maxclients;
+            _network.HostCache[0].driver = _network.DriverLevel;
+            _network.HostCache[0].cname = "local";
         }
 
         public qsocket_t Connect( String host )
         {
-            if( host != "local" )
+            if ( host != "local" )
                 return null;
 
             _LocalConnectPending = true;
 
-            if( _Client == null )
+            if ( _Client == null )
             {
-                _Client = Host.Network.NewSocket();
-                if( _Client == null )
+                _Client = _network.NewSocket( );
+                if ( _Client == null )
                 {
-                    Host.Console.Print( "Loop_Connect: no qsocket available\n" );
+                    _logger.Print( "Loop_Connect: no qsocket available\n" );
                     return null;
                 }
                 _Client.address = "localhost";
             }
-            _Client.ClearBuffers();
+
+            _Client.ClearBuffers( );
             _Client.canSend = true;
 
-            if( _Server == null )
+            if ( _Server == null )
             {
-                _Server = Host.Network.NewSocket();
-                if( _Server == null )
+                _Server = _network.NewSocket( );
+                if ( _Server == null )
                 {
-                    Host.Console.Print( "Loop_Connect: no qsocket available\n" );
+                    _logger.Print( "Loop_Connect: no qsocket available\n" );
                     return null;
                 }
                 _Server.address = "LOCAL";
             }
-            _Server.ClearBuffers();
+            _Server.ClearBuffers( );
             _Server.canSend = true;
 
             _Client.driverdata = _Server;
@@ -132,51 +140,51 @@ namespace SharpQuake
             return _Client;
         }
 
-        public qsocket_t CheckNewConnections()
+        public qsocket_t CheckNewConnections( )
         {
-            if( !_LocalConnectPending )
+            if ( !_LocalConnectPending )
                 return null;
 
             _LocalConnectPending = false;
-            _Server.ClearBuffers();
+            _Server.ClearBuffers( );
             _Server.canSend = true;
-            _Client.ClearBuffers();
+            _Client.ClearBuffers( );
             _Client.canSend = true;
             return _Server;
         }
 
         public Int32 GetMessage( qsocket_t sock )
         {
-            if( sock.receiveMessageLength == 0 )
+            if ( sock.receiveMessageLength == 0 )
                 return 0;
 
             Int32 ret = sock.receiveMessage[0];
             var length = sock.receiveMessage[1] + ( sock.receiveMessage[2] << 8 );
 
             // alignment byte skipped here
-            Host.Network.Message.Clear();
-            Host.Network.Message.FillFrom( sock.receiveMessage, 4, length );
+            _network.Message.Clear( );
+            _network.Message.FillFrom( sock.receiveMessage, 4, length );
 
             length = IntAlign( length + 4 );
             sock.receiveMessageLength -= length;
 
-            if( sock.receiveMessageLength > 0 )
+            if ( sock.receiveMessageLength > 0 )
                 Array.Copy( sock.receiveMessage, length, sock.receiveMessage, 0, sock.receiveMessageLength );
 
-            if( sock.driverdata != null && ret == 1 )
-                ( (qsocket_t)sock.driverdata ).canSend = true;
+            if ( sock.driverdata != null && ret == 1 )
+                ( ( qsocket_t ) sock.driverdata ).canSend = true;
 
             return ret;
         }
 
         public Int32 SendMessage( qsocket_t sock, MessageWriter data )
         {
-            if( sock.driverdata == null )
+            if ( sock.driverdata == null )
                 return -1;
 
-            var sock2 = (qsocket_t)sock.driverdata;
+            var sock2 = ( qsocket_t ) sock.driverdata;
 
-            if( ( sock2.receiveMessageLength + data.Length + 4 ) > NetworkDef.NET_MAXMESSAGE )
+            if ( ( sock2.receiveMessageLength + data.Length + 4 ) > NetworkDef.NET_MAXMESSAGE )
                 Utilities.Error( "Loop_SendMessage: overflow\n" );
 
             // message type
@@ -200,12 +208,12 @@ namespace SharpQuake
 
         public Int32 SendUnreliableMessage( qsocket_t sock, MessageWriter data )
         {
-            if( sock.driverdata == null )
+            if ( sock.driverdata == null )
                 return -1;
 
-            var sock2 = (qsocket_t)sock.driverdata;
+            var sock2 = ( qsocket_t ) sock.driverdata;
 
-            if( ( sock2.receiveMessageLength + data.Length + sizeof( Byte ) + sizeof( Int16 ) ) > NetworkDef.NET_MAXMESSAGE )
+            if ( ( sock2.receiveMessageLength + data.Length + sizeof( Byte ) + sizeof( Int16 ) ) > NetworkDef.NET_MAXMESSAGE )
                 return 0;
 
             var offset = sock2.receiveMessageLength;
@@ -229,7 +237,7 @@ namespace SharpQuake
 
         public Boolean CanSendMessage( qsocket_t sock )
         {
-            if( sock.driverdata == null )
+            if ( sock.driverdata == null )
                 return false;
             return sock.canSend;
         }
@@ -241,18 +249,18 @@ namespace SharpQuake
 
         public void Close( qsocket_t sock )
         {
-            if( sock.driverdata != null )
-                ( (qsocket_t)sock.driverdata ).driverdata = null;
+            if ( sock.driverdata != null )
+                ( ( qsocket_t ) sock.driverdata ).driverdata = null;
 
-            sock.ClearBuffers();
+            sock.ClearBuffers( );
             sock.canSend = true;
-            if( sock == _Client )
+            if ( sock == _Client )
                 _Client = null;
             else
                 _Server = null;
         }
 
-        public void Shutdown()
+        public void Shutdown( )
         {
             _IsInitialised = false;
         }

@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -24,9 +24,12 @@
 
 using System;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
 using SharpQuake.Framework.IO;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Framework.World;
+using SharpQuake.Networking.Client;
+using SharpQuake.Sys;
 
 // chase.c -- chase camera code
 
@@ -44,33 +47,34 @@ namespace SharpQuake.Rendering.Cameras
         {
             get
             {
-                return ( Host.Cvars.Active.Get<Boolean>( ) );
+                return ( Cvars.Active.Get<Boolean>( ) );
             }
         }
 
         private Vector3 _Dest;
 
-        // Instances
-        public Host Host
-        {
-            get;
-            private set;
-        }
+        private readonly ClientVariableFactory _cvars;
+        private readonly RenderState _renderState;
+        private readonly ClientState _clientState;
+        private readonly ServerWorld _serverWorld;
 
-        public ChaseView( Host host )
+        public ChaseView( ClientVariableFactory cvars, RenderState renderState, ClientState clientState, ServerWorld serverWorld )
         {
-            Host = host;
+            _cvars = cvars;
+            _renderState = renderState;
+            _clientState = clientState;
+            _serverWorld = serverWorld;
         }
 
         // Chase_Init
         public void Initialise()
         {
-            if( Host.Cvars.Back == null )
+            if( Cvars.Back == null )
             {
-                Host.Cvars.Back = Host.CVars.Add( "chase_back", 100f );
-                Host.Cvars.Up = Host.CVars.Add( "chase_up", 16f );
-                Host.Cvars.Right = Host.CVars.Add( "chase_right", 0f );
-                Host.Cvars.Active = Host.CVars.Add( "chase_active", false );
+                Cvars.Back = _cvars.Add( "chase_back", 100f );
+                Cvars.Up = _cvars.Add( "chase_up", 16f );
+                Cvars.Right = _cvars.Add( "chase_right", 0f );
+                Cvars.Active = _cvars.Add( "chase_active", false );
             }
         }
 
@@ -86,37 +90,37 @@ namespace SharpQuake.Rendering.Cameras
         {
             // if can't see player, reset
             Vector3 forward, up, right;
-            MathLib.AngleVectors( ref Host.Client.cl.viewangles, out forward, out right, out up );
+            MathLib.AngleVectors( ref _clientState.Data.viewangles, out forward, out right, out up );
 
             // calc exact destination
-            _Dest = Host.RenderContext.RefDef.vieworg - forward * Host.Cvars.Back.Get<Single>( ) - right * Host.Cvars.Right.Get<Single>( );
-            _Dest.Z = Host.RenderContext.RefDef.vieworg.Z + Host.Cvars.Up.Get<Single>( );
+            _Dest = _renderState.Data.vieworg - forward * Cvars.Back.Get<Single>( ) - right * Cvars.Right.Get<Single>( );
+            _Dest.Z = _renderState.Data.vieworg.Z + Cvars.Up.Get<Single>( );
 
             // find the spot the player is looking at
-            var dest = Host.RenderContext.RefDef.vieworg + forward * 4096;
+            var dest = _renderState.Data.vieworg + forward * 4096;
 
             Vector3 stop;
-            TraceLine( ref Host.RenderContext.RefDef.vieworg, ref dest, out stop );
+            TraceLine( ref _renderState.Data.vieworg, ref dest, out stop );
 
             // calculate pitch to look at the same spot from camera
-            stop -= Host.RenderContext.RefDef.vieworg;
+            stop -= _renderState.Data.vieworg;
             Single dist;
             Vector3.Dot( ref stop, ref forward, out dist );
             if( dist < 1 )
                 dist = 1;
 
-            Host.RenderContext.RefDef.viewangles.X = ( Single ) ( -Math.Atan( stop.Z / dist ) / Math.PI * 180.0 );
+            _renderState.Data.viewangles.X = ( Single ) ( -Math.Atan( stop.Z / dist ) / Math.PI * 180.0 );
             //r_refdef.viewangles[PITCH] = -atan(stop[2] / dist) / M_PI * 180;
 
             // move towards destination
-            Host.RenderContext.RefDef.vieworg = _Dest; //VectorCopy(chase_dest, r_refdef.vieworg);
+            _renderState.Data.vieworg = _Dest; //VectorCopy(chase_dest, r_refdef.vieworg);
         }
 
         private void TraceLine( ref Vector3 start, ref Vector3 end, out Vector3 impact )
         {
             var trace = new Trace_t();
 
-            Host.Server.RecursiveHullCheck( Host.Client.cl.worldmodel.Hulls[0], 0, 0, 1, ref start, ref end, trace );
+            _serverWorld.RecursiveHullCheck( _clientState.Data.worldmodel.Hulls[0], 0, 0, 1, ref start, ref end, trace );
 
             impact = trace.endpos; // VectorCopy(trace.endpos, impact);
         }

@@ -90,12 +90,12 @@ namespace SharpQuake.Renderer
             throw new NotImplementedException( );
         }
 
-        public virtual void DrawPicture( BasePicture picture, Int32 x, Int32 y, Color? colour = null, Boolean hasAlpha = false )
+        public virtual void DrawPicture( BasePicture picture, Int32 x, Int32 y, Color? colour = null, Boolean hasAlpha = false, Int32 scale = 1 )
         {
             if ( Device.TextureAtlas.IsDirty )
                 Device.TextureAtlas.Upload( true );
 
-            DrawTexture2D( picture.Texture, picture.Source, new Rectangle( x, y, picture.Width, picture.Height ), colour, hasAlpha );
+            DrawTexture2D( picture.Texture, picture.Source, new Rectangle( x, y, picture.Width * scale, picture.Height * scale ), colour, hasAlpha );
         }
 
         public virtual void DrawPicture( BasePicture picture, Int32 x, Int32 y, Int32 width, Int32 height, Color? colour = null, Boolean hasAlpha = false )
@@ -105,7 +105,15 @@ namespace SharpQuake.Renderer
 
             DrawTexture2D( picture.Texture, picture.Source, new Rectangle( x, y, width, height ), colour, hasAlpha );
         }
-        
+
+        public virtual void DrawPicture( BasePicture picture, RectangleF sourceRect, Rectangle destRect, Color? colour = null, Boolean hasAlpha = false )
+        {
+            if ( Device.TextureAtlas.IsDirty )
+                Device.TextureAtlas.Upload( true );
+
+            DrawTexture2D( picture.Texture, sourceRect, destRect, colour, hasAlpha );
+        }
+
         public virtual void BeginParticles( BaseTexture texture )
         {
             CurrentParticleTexture = texture;
@@ -171,6 +179,14 @@ namespace SharpQuake.Renderer
         public virtual void Fill( Int32 x, Int32 y, Int32 width, Int32 height, Color color )
         {
             throw new NotImplementedException( );
+        }
+
+        public virtual void LineFill( Int32 x, Int32 y, Int32 width, Int32 height, Color color, Int32 thickness = 1 )
+        {
+            Fill( x, y, width, thickness, color ); // Top
+            Fill( x, y + height - thickness, width, thickness, color ); // Bottom
+            Fill( x, y, thickness, height, color ); // Left
+            Fill( x + width - thickness, y, thickness, height, color ); // Right
         }
 
         public virtual void DrawTransTranslate( BaseTexture texture, Int32 x, Int32 y, Int32 width, Int32 height, Byte[] translation )

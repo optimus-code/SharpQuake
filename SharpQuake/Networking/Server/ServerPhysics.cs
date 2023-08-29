@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -25,43 +25,66 @@
 using System;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.BSP;
+using SharpQuake.Framework.Logging;
 using SharpQuake.Framework.Mathematics;
 using SharpQuake.Framework.World;
+using SharpQuake.Networking.Server;
+using SharpQuake.Sys;
+using SharpQuake.Sys.Programs;
 
 namespace SharpQuake
 {
-	partial class server
-	{
+	public class ServerPhysics
+    {
 		private const Single STOP_EPSILON = 0.1f;
 		private const Int32 MAX_CLIP_PLANES = 5;
-		private const Single STEPSIZE = 18;
+		public const Single STEPSIZE = 18;
 
-		/// <summary>
-		/// SV_Physics
-		/// </summary>
-		private void Physics( )
+        private readonly IConsoleLogger _logger;
+        private readonly ServerState _state;
+        private readonly ProgramsState _programsState;
+        private readonly ProgramsExec _programsExec;
+        private readonly ProgramsEdict _programsEdict;
+		private readonly ServerWorld _world;
+		private readonly ServerSound _serverSound;
+        public ServerPhysics( IConsoleLogger logger,  ServerState state, ProgramsState programsState,
+			ProgramsExec programsExec, ProgramsEdict programsEdict, ServerWorld world, ServerSound serverSound )
+        {
+            _logger = logger;
+            _state = state;
+            _programsState = programsState;
+            _programsExec = programsExec;
+            _programsEdict = programsEdict;
+            _world = world;
+			_serverSound = serverSound;
+        }
+
+        /// <summary>
+        /// SV_Physics
+        /// </summary>
+        public void Physics( )
 		{
 			// let the progs know that a new frame has started
-			Host.Programs.GlobalStruct.self = EdictToProg( sv.edicts[0] );
-			Host.Programs.GlobalStruct.other = Host.Programs.GlobalStruct.self;
-			Host.Programs.GlobalStruct.time = ( Single ) sv.time;
-			Host.Programs.Execute( Host.Programs.GlobalStruct.StartFrame );
+			_programsState.GlobalStruct.self = _state.EdictToProg( _state.Data.edicts[0] );
+            _programsState.GlobalStruct.other = _programsState.GlobalStruct.self;
+            _programsState.GlobalStruct.time = ( Single ) _state.Data.time;
+			_programsExec.Execute( _programsState.GlobalStruct.StartFrame );
 
 			//
 			// treat each object in turn
 			//
-			for ( var i = 0; i < sv.num_edicts; i++ )
+			for ( var i = 0; i < _state.Data.num_edicts; i++ )
 			{
-				var ent = sv.edicts[i];
+				var ent = _state.Data.edicts[i];
 				if ( ent.free )
 					continue;
 
-				if ( Host.Programs.GlobalStruct.force_retouch != 0 )
+				if ( _programsState.GlobalStruct.force_retouch != 0 )
 				{
-					LinkEdict( ent, true ); // force retouch even for stationary
+                    _world.LinkEdict( ent, true ); // force retouch even for stationary
 				}
 
-				if ( i > 0 && i <= svs.maxclients )
+				if ( i > 0 && i <= _state.StaticData.maxclients )
 					Physics_Client( ent, i );
 				else
 					switch ( ( Int32 ) ent.v.movetype )
@@ -95,10 +118,10 @@ namespace SharpQuake
 					}
 			}
 
-			if ( Host.Programs.GlobalStruct.force_retouch != 0 )
-				Host.Programs.GlobalStruct.force_retouch -= 1;
+			if ( _programsState.GlobalStruct.force_retouch != 0 )
+				_programsState.GlobalStruct.force_retouch -= 1;
 
-			sv.time += Host.FrameTime;
+			_state.Data.time += Time.Delta;
 		}
 
 		/// <summary>
@@ -122,11 +145,11 @@ namespace SharpQuake
 				AddGravity( ent );
 
 			// move angles
-			MathLib.VectorMA( ref ent.v.angles, ( Single ) Host.FrameTime, ref ent.v.avelocity, out ent.v.angles );
+			MathLib.VectorMA( ref ent.v.angles, ( Single ) Time.Delta, ref ent.v.avelocity, out ent.v.angles );
 
 			// move origin
 			Vector3f move;
-			MathLib.VectorScale( ref ent.v.velocity, ( Single ) Host.FrameTime, out move );
+			MathLib.VectorScale( ref ent.v.velocity, ( Single ) Time.Delta, out move );
 			var trace = PushEntity( ent, ref move );
 
 			if ( trace.fraction == 1 )
@@ -148,7 +171,7 @@ namespace SharpQuake
 				if ( ent.v.velocity.z < 60 || ent.v.movetype != Movetypes.MOVETYPE_BOUNCE )
 				{
 					ent.v.flags = ( Int32 ) ent.v.flags | EdictFlags.FL_ONGROUND;
-					ent.v.groundentity = EdictToProg( trace.ent );
+					ent.v.groundentity = _state.EdictToProg( trace.ent );
 					ent.v.velocity = default( Vector3f );
 					ent.v.avelocity = default( Vector3f );
 				}
@@ -198,15 +221,15 @@ namespace SharpQuake
 
 			Trace_t trace;
 			if ( ent.v.movetype == Movetypes.MOVETYPE_FLYMISSILE )
-				trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref end, MOVE_MISSILE, ent );
+				trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref end, ServerWorld.MOVE_MISSILE, ent );
 			else if ( ent.v.solid == Solids.SOLID_TRIGGER || ent.v.solid == Solids.SOLID_NOT )
 				// only clip against bmodels
-				trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref end, MOVE_NOMONSTERS, ent );
+				trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref end, ServerWorld.MOVE_NOMONSTERS, ent );
 			else
-				trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref end, MOVE_NORMAL, ent );
+				trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref end, ServerWorld.MOVE_NORMAL, ent );
 
 			MathLib.Copy( ref trace.endpos, out ent.v.origin );
-			LinkEdict( ent, true );
+            _world.LinkEdict( ent, true );
 
 			if ( trace.ent != null )
 				Impact( ent, trace.ent );
@@ -220,7 +243,7 @@ namespace SharpQuake
 		private void CheckWaterTransition( MemoryEdict ent )
 		{
 			var org = Utilities.ToVector( ref ent.v.origin );
-			var cont = PointContents( ref org );
+			var cont = _world.PointContents( ref org );
 
 			if ( ent.v.watertype == 0 )
 			{
@@ -234,8 +257,8 @@ namespace SharpQuake
 			{
 				if ( ent.v.watertype == ( Int32 ) Q1Contents.Empty )
 				{
-					// just crossed into water
-					StartSound( ent, 0, "misc/h2ohit1.wav", 255, 1 );
+                    // just crossed into water
+                    _serverSound.StartSound( ent, 0, "misc/h2ohit1.wav", 255, 1 );
 				}
 				ent.v.watertype = cont;
 				ent.v.waterlevel = 1;
@@ -244,8 +267,8 @@ namespace SharpQuake
 			{
 				if ( ent.v.watertype != ( Int32 ) Q1Contents.Empty )
 				{
-					// just crossed into water
-					StartSound( ent, 0, "misc/h2ohit1.wav", 255, 1 );
+                    // just crossed into water
+                    _serverSound.StartSound( ent, 0, "misc/h2ohit1.wav", 255, 1 );
 				}
 				ent.v.watertype = ( Int32 ) Q1Contents.Empty;
 				ent.v.waterlevel = cont;
@@ -257,10 +280,10 @@ namespace SharpQuake
 		/// </summary>
 		private void AddGravity( MemoryEdict ent )
 		{
-			var val = Host.Programs.GetEdictFieldFloat( ent, "gravity" );
+			var val = _programsEdict.GetEdictFieldFloat( ent, "gravity" );
 			if ( val == 0 )
 				val = 1;
-			ent.v.velocity.z -= ( Single ) ( val * Host.Cvars.Gravity.Get<Single>() * Host.FrameTime );
+			ent.v.velocity.z -= ( Single ) ( val * Cvars.Gravity.Get<Single>() * Time.Delta );
 		}
 
 		/// <summary>
@@ -273,20 +296,20 @@ namespace SharpQuake
 			// freefall if not onground
 			if ( ( ( Int32 ) ent.v.flags & ( EdictFlags.FL_ONGROUND | EdictFlags.FL_FLY | EdictFlags.FL_SWIM ) ) == 0 )
 			{
-				if ( ent.v.velocity.z < Host.Cvars.Gravity.Get<Single>() * -0.1 )
+				if ( ent.v.velocity.z < Cvars.Gravity.Get<Single>() * -0.1 )
 					hitsound = true;
 				else
 					hitsound = false;
 
 				AddGravity( ent );
 				CheckVelocity( ent );
-				FlyMove( ent, ( Single ) Host.FrameTime, null );
-				LinkEdict( ent, true );
+				FlyMove( ent, ( Single ) Time.Delta, null );
+                _world.LinkEdict( ent, true );
 
 				if ( ( ( Int32 ) ent.v.flags & EdictFlags.FL_ONGROUND ) != 0 )  // just hit ground
 				{
 					if ( hitsound )
-						StartSound( ent, 0, "demon/dland2.wav", 255, 1 );
+                        _serverSound.StartSound( ent, 0, "demon/dland2.wav", 255, 1 );
 				}
 			}
 
@@ -306,9 +329,9 @@ namespace SharpQuake
 			if ( !RunThink( ent ) )
 				return;
 
-			MathLib.VectorMA( ref ent.v.angles, ( Single ) Host.FrameTime, ref ent.v.avelocity, out ent.v.angles );
-			MathLib.VectorMA( ref ent.v.origin, ( Single ) Host.FrameTime, ref ent.v.velocity, out ent.v.origin );
-			LinkEdict( ent, false );
+			MathLib.VectorMA( ref ent.v.angles, ( Single ) Time.Delta, ref ent.v.avelocity, out ent.v.angles );
+			MathLib.VectorMA( ref ent.v.origin, ( Single ) Time.Delta, ref ent.v.velocity, out ent.v.origin );
+            _world.LinkEdict( ent, false );
 		}
 
 		/// <summary>
@@ -329,14 +352,14 @@ namespace SharpQuake
 			var oldltime = ent.v.ltime;
 			var thinktime = ent.v.nextthink;
 			Single movetime;
-			if ( thinktime < ent.v.ltime + Host.FrameTime )
+			if ( thinktime < ent.v.ltime + Time.Delta )
 			{
 				movetime = thinktime - ent.v.ltime;
 				if ( movetime < 0 )
 					movetime = 0;
 			}
 			else
-				movetime = ( Single ) Host.FrameTime;
+				movetime = ( Single ) Time.Delta;
 
 			if ( movetime != 0 )
 			{
@@ -346,10 +369,10 @@ namespace SharpQuake
 			if ( thinktime > oldltime && thinktime <= ent.v.ltime )
 			{
 				ent.v.nextthink = 0;
-				Host.Programs.GlobalStruct.time = ( Single ) sv.time;
-				Host.Programs.GlobalStruct.self = EdictToProg( ent );
-				Host.Programs.GlobalStruct.other = EdictToProg( sv.edicts[0] );
-				Host.Programs.Execute( ent.v.think );
+				_programsState.GlobalStruct.time = ( Single ) _state.Data.time;
+				_programsState.GlobalStruct.self = _state.EdictToProg( ent );
+				_programsState.GlobalStruct.other = _state.EdictToProg( _state.Data.edicts[0] );
+				_programsExec.Execute( ent.v.think );
 				if ( ent.free )
 					return;
 			}
@@ -361,15 +384,15 @@ namespace SharpQuake
 		/// </summary>
 		private void Physics_Client( MemoryEdict ent, Int32 num )
 		{
-			if ( !svs.clients[num - 1].active )
+			if ( !_state.StaticData.clients[num - 1].active )
 				return;     // unconnected slot
 
 			//
 			// call standard client pre-think
 			//
-			Host.Programs.GlobalStruct.time = ( Single ) sv.time;
-			Host.Programs.GlobalStruct.self = EdictToProg( ent );
-			Host.Programs.Execute( Host.Programs.GlobalStruct.PlayerPreThink );
+			_programsState.GlobalStruct.time = ( Single ) _state.Data.time;
+			_programsState.GlobalStruct.self = _state.EdictToProg( ent );
+			_programsExec.Execute( _programsState.GlobalStruct.PlayerPreThink );
 
 			//
 			// do a move
@@ -404,13 +427,13 @@ namespace SharpQuake
 				case Movetypes.MOVETYPE_FLY:
 					if ( !RunThink( ent ) )
 						return;
-					FlyMove( ent, ( Single ) Host.FrameTime, null );
+					FlyMove( ent, ( Single ) Time.Delta, null );
 					break;
 
 				case Movetypes.MOVETYPE_NOCLIP:
 					if ( !RunThink( ent ) )
 						return;
-					MathLib.VectorMA( ref ent.v.origin, ( Single ) Host.FrameTime, ref ent.v.velocity, out ent.v.origin );
+					MathLib.VectorMA( ref ent.v.origin, ( Single ) Time.Delta, ref ent.v.velocity, out ent.v.origin );
 					break;
 
 				default:
@@ -418,14 +441,14 @@ namespace SharpQuake
 					break;
 			}
 
-			//
-			// call standard player post-think
-			//
-			LinkEdict( ent, true );
+            //
+            // call standard player post-think
+            //
+            _world.LinkEdict( ent, true );
 
-			Host.Programs.GlobalStruct.time = ( Single ) sv.time;
-			Host.Programs.GlobalStruct.self = EdictToProg( ent );
-			Host.Programs.Execute( Host.Programs.GlobalStruct.PlayerPostThink );
+			_programsState.GlobalStruct.time = ( Single ) _state.Data.time;
+			_programsState.GlobalStruct.self = _state.EdictToProg( ent );
+			_programsExec.Execute( _programsState.GlobalStruct.PlayerPostThink );
 		}
 
 		/// <summary>
@@ -443,7 +466,7 @@ namespace SharpQuake
 			var oldorg = ent.v.origin;
 			var oldvel = ent.v.velocity;
 			var steptrace = new Trace_t();
-			var clip = FlyMove( ent, ( Single ) Host.FrameTime, steptrace );
+			var clip = FlyMove( ent, ( Single ) Time.Delta, steptrace );
 
 			if ( ( clip & 2 ) == 0 )
 				return;     // move didn't block on a step
@@ -454,10 +477,10 @@ namespace SharpQuake
 			if ( ent.v.movetype != Movetypes.MOVETYPE_WALK )
 				return;     // gibbed by a trigger
 
-			if ( Host.Cvars.NoStep.Get<Boolean>() )
+			if ( Cvars.NoStep.Get<Boolean>() )
 				return;
 
-			if ( ( ( Int32 ) _Player.v.flags & EdictFlags.FL_WATERJUMP ) != 0 )
+			if ( ( ( Int32 ) _state.Player.v.flags & EdictFlags.FL_WATERJUMP ) != 0 )
 				return;
 
 			var nosteporg = ent.v.origin;
@@ -471,7 +494,7 @@ namespace SharpQuake
 			var upmove = Utilities.ZeroVector3f;
 			var downmove = upmove;
 			upmove.z = STEPSIZE;
-			downmove.z = ( Single ) ( -STEPSIZE + oldvel.z * Host.FrameTime );
+			downmove.z = ( Single ) ( -STEPSIZE + oldvel.z * Time.Delta );
 
 			// move up
 			PushEntity( ent, ref upmove );  // FIXME: don't link?
@@ -480,7 +503,7 @@ namespace SharpQuake
 			ent.v.velocity.x = oldvel.x;
 			ent.v.velocity.y = oldvel.y;
 			ent.v.velocity.z = 0;
-			clip = FlyMove( ent, ( Single ) Host.FrameTime, steptrace );
+			clip = FlyMove( ent, ( Single ) Time.Delta, steptrace );
 
 			// check for stuckness, possibly due to the limited precision of floats
 			// in the clipping hulls
@@ -505,7 +528,7 @@ namespace SharpQuake
 				if ( ent.v.solid == Solids.SOLID_BSP )
 				{
 					ent.v.flags = ( Int32 ) ent.v.flags | EdictFlags.FL_ONGROUND;
-					ent.v.groundentity = EdictToProg( downtrace.ent );
+					ent.v.groundentity = _state.EdictToProg( downtrace.ent );
 				}
 			}
 			else
@@ -640,8 +663,8 @@ namespace SharpQuake
 			ent.v.origin = ent.v.oldorigin;
 			if ( TestEntityPosition( ent ) == null )
 			{
-				Host.Console.DPrint( "Unstuck.\n" );
-				LinkEdict( ent, true );
+				_logger.DPrint( "Unstuck.\n" );
+                _world.LinkEdict( ent, true );
 				return;
 			}
 
@@ -654,14 +677,14 @@ namespace SharpQuake
 						ent.v.origin.z = org.z + z;
 						if ( TestEntityPosition( ent ) == null )
 						{
-							Host.Console.DPrint( "Unstuck.\n" );
-							LinkEdict( ent, true );
+							_logger.DPrint( "Unstuck.\n" );
+                            _world.LinkEdict( ent, true );
 							return;
 						}
 					}
 
 			ent.v.origin = org;
-			Host.Console.DPrint( "player is stuck.\n" );
+			_logger.DPrint( "player is stuck.\n" );
 		}
 
 		/// <summary>
@@ -676,18 +699,18 @@ namespace SharpQuake
 
 			ent.v.waterlevel = 0;
 			ent.v.watertype = ( Int32 ) Q1Contents.Empty;
-			var cont = PointContents( ref point );
+			var cont = _world.PointContents( ref point );
 			if ( cont <= ( Int32 ) Q1Contents.Water )
 			{
 				ent.v.watertype = cont;
 				ent.v.waterlevel = 1;
 				point.Z = ent.v.origin.z + ( ent.v.mins.z + ent.v.maxs.z ) * 0.5f;
-				cont = PointContents( ref point );
+				cont = _world.PointContents( ref point );
 				if ( cont <= ( Int32 ) Q1Contents.Water )
 				{
 					ent.v.waterlevel = 2;
 					point.Z = ent.v.origin.z + ent.v.view_ofs.z;
-					cont = PointContents( ref point );
+					cont = _world.PointContents( ref point );
 					if ( cont <= ( Int32 ) Q1Contents.Water )
 						ent.v.waterlevel = 3;
 				}
@@ -708,19 +731,19 @@ namespace SharpQuake
 			Single thinktime;
 
 			thinktime = ent.v.nextthink;
-			if ( thinktime <= 0 || thinktime > sv.time + Host.FrameTime )
+			if ( thinktime <= 0 || thinktime > _state.Data.time + Time.Delta )
 				return true;
 
-			if ( thinktime < sv.time )
-				thinktime = ( Single ) sv.time; // don't let things stay in the past.
+			if ( thinktime < _state.Data.time )
+				thinktime = ( Single ) _state.Data.time; // don't let things stay in the past.
 
 			// it is possible to start that way
 			// by a trigger with a local time.
 			ent.v.nextthink = 0;
-			Host.Programs.GlobalStruct.time = thinktime;
-			Host.Programs.GlobalStruct.self = EdictToProg( ent );
-			Host.Programs.GlobalStruct.other = EdictToProg( sv.edicts[0] );
-			Host.Programs.Execute( ent.v.think );
+			_programsState.GlobalStruct.time = thinktime;
+			_programsState.GlobalStruct.self = _state.EdictToProg( ent );
+			_programsState.GlobalStruct.other = _state.EdictToProg( _state.Data.edicts[0] );
+			_programsExec.Execute( ent.v.think );
 
 			return !ent.free;
 		}
@@ -735,16 +758,16 @@ namespace SharpQuake
 			//
 			if ( MathLib.CheckNaN( ref ent.v.velocity, 0 ) )
 			{
-				Host.Console.Print( "Got a NaN velocity on {0}\n", Host.Programs.GetString( ent.v.classname ) );
+				_logger.Print( "Got a NaN velocity on {0}\n", _programsState.GetString( ent.v.classname ) );
 			}
 
 			if ( MathLib.CheckNaN( ref ent.v.origin, 0 ) )
 			{
-				Host.Console.Print( "Got a NaN origin on {0}\n", Host.Programs.GetString( ent.v.classname ) );
+				_logger.Print( "Got a NaN origin on {0}\n", _programsState.GetString( ent.v.classname ) );
 			}
 
-			var max = Vector3.One * Host.Cvars.MaxVelocity.Get<Single>();
-			var min = -Vector3.One * Host.Cvars.MaxVelocity.Get<Single>();
+			var max = Vector3.One * Cvars.MaxVelocity.Get<Single>();
+			var min = -Vector3.One * Cvars.MaxVelocity.Get<Single>();
 			MathLib.Clamp( ref ent.v.velocity, ref min, ref max, out ent.v.velocity );
 		}
 
@@ -803,7 +826,7 @@ namespace SharpQuake
 					if ( trace.ent.v.solid == Solids.SOLID_BSP )
 					{
 						ent.v.flags = ( Int32 ) ent.v.flags | EdictFlags.FL_ONGROUND;
-						ent.v.groundentity = EdictToProg( trace.ent );
+						ent.v.groundentity = _state.EdictToProg( trace.ent );
 					}
 				}
 
@@ -886,42 +909,42 @@ namespace SharpQuake
 			return blocked;
 		}
 
-		private Trace_t Move( ref Vector3f start, ref Vector3f mins, ref Vector3f maxs, ref Vector3f end, Int32 type, MemoryEdict passedict )
+		public Trace_t Move( ref Vector3f start, ref Vector3f mins, ref Vector3f maxs, ref Vector3f end, Int32 type, MemoryEdict passedict )
 		{
 			Vector3 vstart, vmins, vmaxs, vend;
 			MathLib.Copy( ref start, out vstart );
 			MathLib.Copy( ref mins, out vmins );
 			MathLib.Copy( ref maxs, out vmaxs );
 			MathLib.Copy( ref end, out vend );
-			return Move( ref vstart, ref vmins, ref vmaxs, ref vend, type, passedict );
+			return _world.Move( ref vstart, ref vmins, ref vmaxs, ref vend, type, passedict );
 		}
 
-		/// <summary>
-		/// SV_Impact
-		/// Two entities have touched, so run their touch functions
-		/// </summary>
-		private void Impact( MemoryEdict e1, MemoryEdict e2 )
+        /// <summary>
+        /// SV_Impact
+        /// Two entities have touched, so run their touch functions
+        /// </summary>
+        private void Impact( MemoryEdict e1, MemoryEdict e2 )
 		{
-			var old_self = Host.Programs.GlobalStruct.self;
-			var old_other = Host.Programs.GlobalStruct.other;
+			var old_self = _programsState.GlobalStruct.self;
+			var old_other = _programsState.GlobalStruct.other;
 
-			Host.Programs.GlobalStruct.time = ( Single ) sv.time;
+			_programsState.GlobalStruct.time = ( Single ) _state.Data.time;
 			if ( e1.v.touch != 0 && e1.v.solid != Solids.SOLID_NOT )
 			{
-				Host.Programs.GlobalStruct.self = EdictToProg( e1 );
-				Host.Programs.GlobalStruct.other = EdictToProg( e2 );
-				Host.Programs.Execute( e1.v.touch );
+				_programsState.GlobalStruct.self = _state.EdictToProg( e1 );
+				_programsState.GlobalStruct.other = _state.EdictToProg( e2 );
+				_programsExec.Execute( e1.v.touch );
 			}
 
 			if ( e2.v.touch != 0 && e2.v.solid != Solids.SOLID_NOT )
 			{
-				Host.Programs.GlobalStruct.self = EdictToProg( e2 );
-				Host.Programs.GlobalStruct.other = EdictToProg( e1 );
-				Host.Programs.Execute( e2.v.touch );
+				_programsState.GlobalStruct.self = _state.EdictToProg( e2 );
+				_programsState.GlobalStruct.other = _state.EdictToProg( e1 );
+				_programsExec.Execute( e2.v.touch );
 			}
 
-			Host.Programs.GlobalStruct.self = old_self;
-			Host.Programs.GlobalStruct.other = old_other;
+			_programsState.GlobalStruct.self = old_self;
+			_programsState.GlobalStruct.other = old_other;
 		}
 
 		/// <summary>
@@ -949,13 +972,13 @@ namespace SharpQuake
 
 			MathLib.VectorAdd( ref pusher.v.origin, ref move, out pusher.v.origin );
 			pusher.v.ltime += movetime;
-			LinkEdict( pusher, false );
+            _world.LinkEdict( pusher, false );
 
 			// see if any solid entities are inside the final position
 			var num_moved = 0;
-			for ( var e = 1; e < sv.num_edicts; e++ )
+			for ( var e = 1; e < _state.Data.num_edicts; e++ )
 			{
-				var check = sv.edicts[e];
+				var check = _state.Data.edicts[e];
 				if ( check.free )
 					continue;
 				if ( check.v.movetype == Movetypes.MOVETYPE_PUSH ||
@@ -964,7 +987,7 @@ namespace SharpQuake
 					continue;
 
 				// if the entity is standing on the pusher, it will definately be moved
-				if ( !( ( ( Int32 ) check.v.flags & EdictFlags.FL_ONGROUND ) != 0 && ProgToEdict( check.v.groundentity ) == pusher ) )
+				if ( !( ( ( Int32 ) check.v.flags & EdictFlags.FL_ONGROUND ) != 0 && _state.ProgToEdict( check.v.groundentity ) == pusher ) )
 				{
 					if ( check.v.absmin.x >= maxs.x || check.v.absmin.y >= maxs.y ||
 						check.v.absmin.z >= maxs.z || check.v.absmax.x <= mins.x ||
@@ -1006,30 +1029,44 @@ namespace SharpQuake
 					}
 
 					check.v.origin = entorig;
-					LinkEdict( check, true );
+                    _world.LinkEdict( check, true );
 
 					pusher.v.origin = pushorig;
-					LinkEdict( pusher, false );
+					_world.LinkEdict( pusher, false );
 					pusher.v.ltime -= movetime;
 
 					// if the pusher has a "blocked" function, call it
 					// otherwise, just stay in place until the obstacle is gone
 					if ( pusher.v.blocked != 0 )
 					{
-						Host.Programs.GlobalStruct.self = EdictToProg( pusher );
-						Host.Programs.GlobalStruct.other = EdictToProg( check );
-						Host.Programs.Execute( pusher.v.blocked );
+						_programsState.GlobalStruct.self = _state.EdictToProg( pusher );
+						_programsState.GlobalStruct.other = _state.EdictToProg( check );
+						_programsExec.Execute( pusher.v.blocked );
 					}
 
 					// move back any entities we already moved
 					for ( var i = 0; i < num_moved; i++ )
 					{
 						moved_edict[i].v.origin = moved_from[i];
-						LinkEdict( moved_edict[i], false );
+						_world.LinkEdict( moved_edict[i], false );
 					}
 					return;
 				}
 			}
 		}
-	}
+
+        /// <summary>
+        /// SV_TestEntityPosition
+        /// This could be a lot more efficient...
+        /// </summary>
+        public MemoryEdict TestEntityPosition( MemoryEdict ent )
+        {
+            var trace = Move( ref ent.v.origin, ref ent.v.mins, ref ent.v.maxs, ref ent.v.origin, 0, ent );
+
+            if ( trace.startsolid )
+                return _state.Data.edicts[0];
+
+            return null;
+        }
+    }
 }

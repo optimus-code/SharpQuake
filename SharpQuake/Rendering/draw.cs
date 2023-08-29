@@ -1,6 +1,6 @@
 /// <copyright>
 ///
-/// SharpQuakeEvolved changes by optimus-code, 2019
+/// SharpQuakeEvolved changes by optimus-code, 2019-2023
 /// 
 /// Based on SharpQuake (Quake Rewritten in C# by Yury Kiselev, 2010.)
 ///
@@ -29,9 +29,15 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using SharpQuake.Factories.Rendering.UI;
 using SharpQuake.Framework;
+using SharpQuake.Framework.Factories.IO;
+using SharpQuake.Framework.Factories.IO.WAD;
 using SharpQuake.Framework.IO;
 using SharpQuake.Framework.IO.WAD;
+using SharpQuake.Framework.Logging;
+using SharpQuake.Logging;
 using SharpQuake.Renderer.Textures;
+using SharpQuake.Rendering;
+using SharpQuake.Sys;
 
 // gl_draw.c
 
@@ -64,6 +70,18 @@ namespace SharpQuake
             set;
         }
 
+        private Renderer.TTFFont TTFFont
+        {
+            get;
+            set;
+        }
+
+        private Renderer.TTFFont BigTTFFont
+        {
+            get;
+            set;
+        }
+
         private BaseTexture TranslateTexture
         {
             get;
@@ -86,13 +104,6 @@ namespace SharpQuake
             private set;
         }
 
-        // CHANGE
-        private Host Host
-        {
-            get;
-            set;
-        }
-
         public Byte[] FontBuffer
         {
             get;
@@ -105,38 +116,54 @@ namespace SharpQuake
             private set;
         }
 
-        public Drawer( Host host )
+        private readonly IConsoleLogger _logger;
+        private readonly CommandFactory _commands;
+        private readonly ClientVariableFactory _cvars;
+        private readonly WadFactory _wads;
+        private readonly ElementFactory _elements;
+        private readonly PictureFactory _pictures;
+        private readonly Vid _video;
+
+        public Drawer( IConsoleLogger logger, CommandFactory commands, ClientVariableFactory cvars, WadFactory wads, 
+            ElementFactory elements, Vid video, PictureFactory pictures )
         {
-            Host = host;
+            _logger = logger;
+            _commands = commands;
+            _cvars = cvars;
+            _wads = wads;
+            _elements = elements;
+            _video = video;
+            _pictures = pictures;
         }
 
         // Draw_Init
         public void Initialise( )
         {
-            if ( Host.Cvars.glNoBind == null )
+            if ( Cvars.glNoBind == null )
             {
-                Host.Cvars.glNoBind = Host.CVars.Add( "gl_nobind", false );
-                Host.Cvars.glMaxSize = Host.CVars.Add( "gl_max_size", 8192 );
-                Host.Cvars.glPicMip = Host.CVars.Add( "gl_picmip", 0f );
+                Cvars.glNoBind = _cvars.Add( "gl_nobind", false );
+                Cvars.glMaxSize = _cvars.Add( "gl_max_size", 8192 );
+                Cvars.glPicMip = _cvars.Add( "gl_picmip", 0f );
+                Cvars.TrueTypeFonts = _cvars.Add( "r_ttf", true );
             }
 
             // 3dfx can only handle 256 wide textures
-            var renderer = Host.Video.Device.Desc.Renderer;
+            var renderer = _video.Device.Desc.Renderer;
 
             if ( renderer.Contains( "3dfx" ) || renderer.Contains( "Glide" ) )
-                Host.CVars.Set( "gl_max_size", 256 );
+                _cvars.Set( "gl_max_size", 256 );
 
-            Host.Commands.Add( "gl_texturemode", TextureMode_f );
-            Host.Commands.Add( "imagelist", Imagelist_f );
+            _commands.Add( "gl_texturemode", TextureMode_f );
+            _commands.Add( "imagelist", Imagelist_f );
 
             InitialiseTypography( );            
             
-            TranslateTexture = BaseTexture.FromDynamicBuffer( Host.Video.Device, "_TranslateTexture", new ByteArraySegment( _MenuPlayerPixels ), _MenuPlayerPixelWidth, _MenuPlayerPixelHeight, false, true, "GL_LINEAR" );
+            TranslateTexture = BaseTexture.FromDynamicBuffer( _video.Device, "_TranslateTexture", new ByteArraySegment( _MenuPlayerPixels ), _MenuPlayerPixelWidth, _MenuPlayerPixelHeight, false, true, "GL_LINEAR" );
 
             //
             // get the other pics we need
             //            
-            BackgroundTile = BasePicture.FromWad( Host.Video.Device, Host.Wads.FromTexture( "backtile" ), "backtile", "GL_NEAREST" );
+            BackgroundTile = BasePicture.FromWad( _video.Device, _wads.FromTexture( "backtile" ), "backtile", "GL_NEAREST" );
 
             IsInitialised = true;
         }
@@ -147,7 +174,7 @@ namespace SharpQuake
             // by hand, because we need to write the version
             // string into the background before turning
             // it into a texture
-            var concharsWad = Host.Wads.FromTexture( "conchars" );
+            var concharsWad = _wads.FromTexture( "conchars" );
             var offset = concharsWad.GetLumpNameOffset( "conchars" );
             var draw_chars = concharsWad.Data; // draw_chars
 
@@ -163,11 +190,49 @@ namespace SharpQuake
             FontBufferOffset = offset;
 
             // Temporarily set here
-            BaseTexture.PicMip = Host.Cvars.glPicMip.Get<Single>( );
-            BaseTexture.MaxSize = Host.Cvars.glMaxSize.Get<Int32>( );
+            BaseTexture.PicMip = Cvars.glPicMip.Get<Single>( );
+            BaseTexture.MaxSize = Cvars.glMaxSize.Get<Int32>( );
 
-            CharSetFont = new Renderer.Font( Host.Video.Device, "charset" );
+            CharSetFont = new Renderer.Font( _video.Device, "charset" );
             CharSetFont.Initialise( fontBuffer );
+
+            TTFFont = new Renderer.TTFFont( _video.Device, "Xolonium", 20 );
+
+            var ttfFile = FileSystem.LoadFile( "Xolonium-Bold.ttf" );
+
+            if ( ttfFile == null )
+                ttfFile = System.IO.File.ReadAllBytes( @"C:\Windows\Fonts\Arial.ttf" );
+
+            TTFFont.Initialise( new ByteArraySegment( ttfFile ) );
+
+            BigTTFFont = new Renderer.TTFFont( _video.Device, "Big Xolonium", 52, 8 );
+            BigTTFFont.Initialise( new ByteArraySegment( ttfFile ) );
+        }
+
+        public Int32 CharacterAdvance( Boolean forceCharset = false, Boolean isBigFont = false )
+        {
+            if ( !forceCharset && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+            {
+                if ( isBigFont )
+                    return BigTTFFont.CharacterAdvance( );
+                else
+                    return TTFFont.CharacterAdvance( );
+            }
+            else
+                return CharSetFont.CharacterAdvance( );
+        }
+
+        public Int32 CharacterAdvanceHeight( Boolean forceCharset = false, Boolean isBigFont = false )
+        {
+            if ( !forceCharset && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+            {
+                if ( isBigFont )
+                    return BigTTFFont.CharacterAdvanceHeight( );
+                else
+                    return TTFFont.CharacterAdvanceHeight( );
+            }
+            else
+                return CharSetFont.CharacterAdvanceHeight( );
         }
 
         // Draw_TileClear
@@ -178,14 +243,14 @@ namespace SharpQuake
         {
             BackgroundTile.Source = new RectangleF( x / 64.0f, y / 64.0f, w / 64f, h / 64f );
 
-            Host.Video.Device.Graphics.DrawPicture( BackgroundTile, x, y, w, h );
+            _video.Device.Graphics.DrawPicture( BackgroundTile, x, y, w, h );
         }
         
         // Draw_FadeScreen
         public void FadeScreen( )
         {
-            Host.Video.Device.Graphics.FadeScreen( );
-            Host.Screen.Elements.SetDirty( ElementFactory.HUD );
+            _video.Device.Graphics.FadeScreen( );
+            _elements.SetDirty( ElementFactory.HUD );
         }
 
         // Draw_Character
@@ -194,15 +259,128 @@ namespace SharpQuake
         // It can be clipped to the top of the screen to allow the console to be
         // smoothly scrolled off.
         // Vertex color modification has no effect currently
-        public void DrawCharacter( Int32 x, Int32 y, Int32 num, System.Drawing.Color? color = null )
+        public void DrawCharacter( Int32 x, Int32 y, Int32 num, Boolean forceCharset = false, System.Drawing.Color? color = null, Boolean isBigFont = false )
         {
-            CharSetFont.DrawCharacter( x, y, num, color );
+            if ( !forceCharset && num >= 32 && Cvars.TrueTypeFonts.Get<Boolean>() )
+            {
+                if ( isBigFont )
+                    BigTTFFont.DrawCharacter( x, y, num, color );
+                else
+                    TTFFont.DrawCharacter( x, y, num, color );
+            }
+            else
+                CharSetFont.DrawCharacter( x, y, num, color );
+        }
+
+        public void DrawCharacterStretched( Int32 x, Int32 y, Int32 num, Int32 width )
+        {
+            CharSetFont.DrawCharacterStretched( x, y, num, width );
+        }
+
+        public Int32 MeasureCharacter( Char character, Boolean forceCharset = false, Boolean isBigFont = false )
+        {
+            if ( !forceCharset && character >= 32 && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+            {
+                if ( isBigFont )
+                    return BigTTFFont.Measure( character );
+                else
+                    return TTFFont.Measure( character );
+            }
+            else
+                return CharSetFont.Measure( character );
+        }
+
+        public Int32 MeasureCharacterHeight( Char character, Boolean forceCharset = false, Boolean isBigFont = false )
+        {
+            if ( !forceCharset && character >= 32 && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+            {
+                if ( isBigFont )
+                    return BigTTFFont.MeasureHeight( character );
+                else
+                    return TTFFont.MeasureHeight( character );
+            }
+            else
+                return CharSetFont.MeasureHeight( character );
+        }
+
+        public Int32 MeasureString( String text, Boolean forceCharset = false, Boolean isBigFont = false )
+        {
+            var width = 0;
+
+            foreach ( var character in text )
+            {
+                width += CharacterAdvance( forceCharset, isBigFont ) + MeasureCharacter( character, forceCharset, isBigFont );
+            }
+
+            return width;
+        }
+
+        public UInt32[] GetCharacterBuffer( Char character, Boolean forceCharset = false, Boolean isBigFont = false )
+        {
+            if ( !forceCharset && character >= 32 && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+            {
+                if ( isBigFont )
+                    return BigTTFFont.GetCharacterBuffer( character );
+                else
+                    return TTFFont.GetCharacterBuffer( character );
+            }
+            else
+                return CharSetFont.GetCharacterBuffer( character );
         }
 
         // Draw_String
-        public void DrawString( Int32 x, Int32 y, String str, System.Drawing.Color? color = null )
+        public void DrawString( Int32 x, Int32 y, String str, Boolean forceCharset = false, System.Drawing.Color? color = null, Boolean isBigFont = false )
         {
-            CharSetFont.Draw( x, y, str, color );
+            if ( !forceCharset && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+            {
+                if ( isBigFont )
+                    BigTTFFont.Draw( x, y, str, color );
+                else
+                    TTFFont.Draw( x, y, str, color );
+            }
+            else
+                CharSetFont.Draw( x, y, str, color );
+        }
+
+		public void DrawRichString( Int32 cx, Int32 cy, String str, Boolean forceCharset = false, Boolean isBigFont = false, Color? colour = null )
+        {
+            if ( !colour.HasValue && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+                colour = Colours.Quake;
+
+            var defaultColour = colour;
+
+            var xAdvance = cx;
+
+            for ( var i = 0; i < str.Length; i++ )
+            {
+                var c = str[i];
+                int color = -1;
+                var inColorCode = str[i] == '^' && i + 1 < str.Length && int.TryParse( "" + str[i + 1], out color );
+
+                if ( inColorCode && color >= 0 )
+                {
+                    colour = Colours.FromCode( color, defaultColour );
+                    
+                    i += 1;
+                    continue;
+                }
+
+                DrawCharacter( xAdvance, cy, c, forceCharset, colour, isBigFont );
+                xAdvance += CharacterAdvance( forceCharset, isBigFont ) + MeasureCharacter( ( Char ) c, forceCharset, isBigFont );
+            }
+        }
+
+        public (Int32 X, Int32 Y) GetCharacterOffset( Char character, Boolean forceCharset = false, Boolean isBigFont = false )
+        {
+            if ( !forceCharset && Cvars.TrueTypeFonts.Get<Boolean>( ) )
+            {
+                if ( isBigFont )
+                    return BigTTFFont.GetCharacterOffset( character );
+                else
+                    return TTFFont.GetCharacterOffset( character );
+            }
+            else
+                return CharSetFont.GetCharacterOffset( character );
         }
 
         /// <summary>
@@ -211,7 +389,7 @@ namespace SharpQuake
         /// </summary>
         public void TransPicTranslate( Int32 x, Int32 y, BasePicture pic, Byte[] translation )
         {
-            Host.Video.Device.Graphics.DrawTransTranslate( TranslateTexture, x, y, pic.Width, pic.Height, translation );
+            _video.Device.Graphics.DrawTransTranslate( TranslateTexture, x, y, pic.Width, pic.Height, translation );
         }
 
         /// <summary>
@@ -219,16 +397,16 @@ namespace SharpQuake
         /// </summary>
         public void SelectTexture( MTexTarget target )
         {
-            if ( !Host.Video.Device.Desc.SupportsMultiTexture )
+            if ( !_video.Device.Desc.SupportsMultiTexture )
                 return;
 
-            Host.Video.Device.SelectTexture( target );
+            _video.Device.SelectTexture( target );
 
             if ( target == _OldTarget )
                 return;
 
-            _CntTextures[_OldTarget - MTexTarget.TEXTURE0_SGIS] = Host.DrawingContext.CurrentTexture;
-            Host.DrawingContext.CurrentTexture = _CntTextures[target - MTexTarget.TEXTURE0_SGIS];
+            _CntTextures[_OldTarget - MTexTarget.TEXTURE0_SGIS] = CurrentTexture;
+            CurrentTexture = _CntTextures[target - MTexTarget.TEXTURE0_SGIS];
             _OldTarget = target;
         }
 
@@ -239,33 +417,33 @@ namespace SharpQuake
         {
             if ( msg.Parameters == null || msg.Parameters.Length == 0 )
             {
-                foreach ( var textureFilter in Host.Video.Device.TextureFilters )
+                foreach ( var textureFilter in _video.Device.TextureFilters )
                 {
-                    if ( CurrentFilter == textureFilter.Name )
+                    if ( CurrentFilter == textureFilter.Key )
                     {
-                        Host.Console.Print( $"{textureFilter.Name}\n" );
+                        _logger.Print( textureFilter.Key + '\n' );
                         return;
                     }
                 }
 
-                Host.Console.Print( "current filter is unknown???\n" );
+                _logger.Print( "current filter is unknown???\n" );
                 return;
             }
 
             BaseTextureFilter newFilter = null;
 
-            foreach ( var textureFilter in Host.Video.Device.TextureFilters )
+            foreach ( var textureFilter in _video.Device.TextureFilters )
             {
-                if ( Utilities.SameText( textureFilter.Name, msg.Parameters[0] ) )
+                if ( Utilities.SameText( textureFilter.Key, msg.Parameters[0] ) )
                 {
-                    newFilter = textureFilter;
+                    newFilter = textureFilter.Value;
                     break;
                 }
             }
 
             if ( newFilter == null )
             {
-                Host.Console.Print( "bad filter name!\n" );
+                _logger.Print( "bad filter name!\n" );
                 return;
             }
 
@@ -281,13 +459,13 @@ namespace SharpQuake
                     t.Desc.Filter = newFilter.Name;
                     t.Bind( );
 
-                    Host.Video.Device.SetTextureFilters( newFilter.Name );
+                    _video.Device.SetTextureFilters( newFilter.Name );
 
                     count++;
                 }
             }
 
-            Host.Console.Print( $"Set {count} textures to {newFilter.Name}\n" );
+            _logger.Print( $"Set {count} textures to {newFilter.Name}\n" );
             CurrentFilter = newFilter.Name;
         }
 
@@ -299,13 +477,69 @@ namespace SharpQuake
             {
                 if ( glTexture != null )
                 {
-                    Host.Console.Print( "{0} x {1}   {2}:{3}\n", glTexture.width, glTexture.height,
+                    _logger.Print( "{0} x {1}   {2}:{3}\n", glTexture.width, glTexture.height,
                     glTexture.owner, glTexture.identifier );
                     textureCount++;
                 }
             }
 
-            Host.Console.Print( "{0} textures currently loaded.\n", textureCount );
+            _logger.Print( "{0} textures currently loaded.\n", textureCount );
+        }
+
+
+        public void DrawFrame( Int32 x, Int32 y, Int32 width, Int32 height, Int32 scale = 1 )
+        {
+            DrawFrame( new Rectangle( x, y, width, height ), scale );
+        }
+
+        public void DrawFrame( Rectangle rect, Int32 scale = 1 )
+        {
+            var offset = 24; // Buffer to make sure it fits the bounds more accurately
+            var x = rect.X - offset;
+            var y = rect.Y - offset;
+            var width = rect.Width + ( offset * 2 );
+            var height = rect.Height + ( offset * 2 );
+
+            var size = ( 8f * scale );
+            var sizeMiddleX = ( 16f * scale );
+            var intSize = ( Int32 ) ( 8f * scale );
+            var doubleSize = intSize * 2;
+            var innerWidth = ( width - doubleSize );
+            var innerHeight = ( height - doubleSize );
+
+            var topLeft = _pictures.Cache( "gfx/box_tl.lmp", "GL_NEAREST", ignoreAtlas: true );
+            var middleLeft = _pictures.Cache( "gfx/box_ml.lmp", "GL_NEAREST", ignoreAtlas: true );
+            var bottomLeft = _pictures.Cache( "gfx/box_bl.lmp", "GL_NEAREST", ignoreAtlas: true );
+
+            var topMiddle = _pictures.Cache( "gfx/box_tm.lmp", "GL_NEAREST", ignoreAtlas: true );
+            var middleTopCentre = _pictures.Cache( "gfx/box_mm.lmp", "GL_NEAREST", ignoreAtlas: true );
+            var middleCentre = _pictures.Cache( "gfx/box_mm2.lmp", "GL_NEAREST", ignoreAtlas: true );
+            var bottomMiddle = _pictures.Cache( "gfx/box_bm.lmp", "GL_NEAREST", ignoreAtlas: true );
+
+            var topRight = _pictures.Cache( "gfx/box_tr.lmp", "GL_NEAREST", ignoreAtlas: true );
+            var middleRight = _pictures.Cache( "gfx/box_mr.lmp", "GL_NEAREST", ignoreAtlas: true );
+            var bottomRight = _pictures.Cache( "gfx/box_br.lmp", "GL_NEAREST", ignoreAtlas: true );
+
+            // Top
+            _video.Device.Graphics.DrawPicture( topLeft, new RectangleF( 0f, 0f, 1f, 1f ), new Rectangle( x, y, intSize, intSize ), hasAlpha: true );
+            _video.Device.Graphics.DrawPicture( topMiddle, new RectangleF( 0f, 0f, innerWidth / size, 1f ), new Rectangle( x + intSize, y, innerWidth, intSize ), hasAlpha: true );
+            _video.Device.Graphics.DrawPicture( topRight, new RectangleF( 0f, 0f, 1f, 1f ), new Rectangle( x + width - intSize, y, intSize, intSize ), hasAlpha: true );
+
+            // Top - Shadow
+            _video.Device.Graphics.DrawPicture( middleTopCentre, new RectangleF( 0f, 0f, innerWidth / sizeMiddleX, 1f ), new Rectangle( x + intSize, y + intSize, innerWidth, intSize ), hasAlpha: true );
+
+            // Middle
+            _video.Device.Graphics.DrawPicture( middleLeft, new RectangleF( 0f, 0f, 1f, innerHeight / size ), new Rectangle( x, y + intSize, intSize, innerHeight ), hasAlpha: true );
+
+            // Middle fill
+            _video.Device.Graphics.DrawPicture( middleCentre, new RectangleF( 0f, 0f, innerWidth / sizeMiddleX, ( innerHeight - intSize ) / size ), new Rectangle( x + intSize, y + doubleSize, innerWidth, innerHeight - intSize ), hasAlpha: true );
+
+            _video.Device.Graphics.DrawPicture( middleRight, new RectangleF( 0f, 0f, 1f, innerHeight / size ), new Rectangle( x + width - intSize, y + intSize, intSize, innerHeight ), hasAlpha: true );
+
+            // Bottom
+            _video.Device.Graphics.DrawPicture( bottomLeft, new RectangleF( 0f, 0f, 1f, 1f ), new Rectangle( x, y + height - intSize, intSize, intSize ), hasAlpha: true );
+            _video.Device.Graphics.DrawPicture( bottomMiddle, new RectangleF( 0f, 0f, width / size, 1f ), new Rectangle( x + intSize, y + height - intSize, innerWidth, intSize ), hasAlpha: true );
+            _video.Device.Graphics.DrawPicture( bottomRight, new RectangleF( 0f, 0f, 1f, 1f ), new Rectangle( x + width - intSize, y + height - intSize, intSize, intSize ), hasAlpha: true );
         }
     }
 }
