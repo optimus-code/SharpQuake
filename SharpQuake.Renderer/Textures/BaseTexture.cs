@@ -372,10 +372,15 @@ namespace SharpQuake.Renderer.Textures
             return FromBuffer( device, desc, buffer );
         }
 
-        public static BaseTexture FromBuffer( BaseDevice device, String identifier, UInt32[] buffer, Int32 width, Int32 height, System.Boolean hasMipMap, System.Boolean hasAlpha, String filter = "GL_LINEAR_MIPMAP_NEAREST", String blendMode = "", Boolean isLightMap = false, Boolean preservePixelBuffer = false )
+        public static BaseTexture FromBuffer( BaseDevice device, String identifier, UInt32[] buffer, Int32 width, Int32 height, System.Boolean hasMipMap, System.Boolean hasAlpha, String filter = "GL_LINEAR_MIPMAP_NEAREST", String blendMode = "", Boolean isLightMap = false, Boolean preservePixelBuffer = false, Boolean ignoreCache = false )
         {
             if ( ExistsInPool( identifier ) )
-                return TexturePool[identifier];
+            {
+                if ( ignoreCache )
+                    TexturePool.Remove( identifier );
+                else
+                    return TexturePool[identifier];
+            }
 
             var desc = ( BaseTextureDesc ) Activator.CreateInstance( device.TextureDescType );
             desc.Name = identifier;

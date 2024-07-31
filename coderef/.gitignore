@@ -1,0 +1,5 @@
+SharpQuake.csproj.user
+packages/
+obj/
+\.vs/
+bin/

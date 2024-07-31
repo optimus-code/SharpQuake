@@ -26,11 +26,12 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
-using SharpFont.Cache;
 using SharpQuake.Framework;
 using SharpQuake.Framework.IO.BSP;
 using SharpQuake.Framework.IO.WAD;
@@ -438,12 +439,16 @@ namespace SharpQuake.Game.Data.Models
 
         public void Load( String name, Byte[] buffer, Action<ModelTexture> onCheckInitSkyTexture, Func<String, WadLumpBuffer> onCheckForTexture )
         {
+            Allocated = new Int32[LIGHTMAP_WIDTH];
+            NewLightData = null;
             Name = name;
             Buffer = buffer;
             BinaryReader = new BinaryReader( new MemoryStream( Buffer ) );
 
             LoadHeader( );
             SwapLumps( );
+
+            NewLightData = new UInt32[LIGHTMAP_WIDTH * LIGHTMAP_HEIGHT];
 
             // load into heap
             if ( Version == BspDef.Q1_BSPVERSION || Version == BspDef.HL_BSPVERSION )
@@ -640,91 +645,201 @@ namespace SharpQuake.Game.Data.Models
 
         private Int32 _ColinElim;
 
+        private BaseTexture lmTexture;
+
         private void BuildSurfaces2()
         {
-            var scale = 1f;
+            if ( !IsWorld )
+                return;
+
+            Polys = new List<GLPoly>( );
+
+            var texscale = 0.03f;
+            var invertedTexscale = 1f - texscale;
+            var scale = 1f;// 0.03f;
             var indices = new List<UInt32>( );
             var verts = new List<BufferVertex>( );
 
             var surfOffset = 0;
-            for ( var k = 0; k < NumModelSurfaces; k++, surfOffset++ )
+
+            for ( var k = 0; k < NumSurfaces; k++, surfOffset++ )
             {
                 var surf = Surfaces[surfOffset];
 
-                var poly = new GLPoly( );
-                poly.FirstIndex = indices.Count;
-                poly.FirstVertex = verts.Count;
+                var p = BuildPoly( surf );
 
-                surf.polys = poly;
+                if ( p == null )
+                    continue;
 
-                var p = surf.polys;
+                p.FirstIndex = indices.Count;
+                p.FirstVertex = verts.Count;
+                p.Texture = surf.texinfo.texture.texture;
+                p.LightMapTextureNum = surf.lightmaptexturenum;
 
-                var baseIndex = p.FirstVertex;
+                Polys.Add( p );
 
-                var pplane = surf.plane;
-                var normal = new Vector3( -pplane.normal.X, -pplane.normal.Z, pplane.normal.Y );
-                
+                UInt32 ti = ( UInt32 ) p.FirstIndex;
 
-                //for ( var vi = 0; vi < p.numverts; vi++ )
+                var added = 0;
+
+                //for ( int vi = 0; vi < p.numverts; vi += 3, ti += 3 )
+                ////   for ( var i = 0; i < p.numverts; i++ )
                 //{
-                //    CalcLightmapCoordinates( surf, p, vi );
+                //    if ( vi + 3 >= p.numverts )
+                //        break;
+
+                //    var vert1 = p.verts[vi];
+                //    verts.Add( new BufferVertex
+                //    {
+                //        Position = new Vector3( vert1[0], vert1[1], vert1[2] ),
+                //        UV = new Vector2( vert1[5], vert1[6] )
+                //    } );
+
+                //    var vert2 = p.verts[vi + 1];
+                //    verts.Add( new BufferVertex
+                //    {
+                //        Position = new Vector3( vert2[0], vert2[1], vert2[2] ),
+                //        UV = new Vector2( vert2[5], vert2[6] )
+                //    } );
+
+                //    var vert3 = p.verts[vi + 2];
+                //    verts.Add( new BufferVertex
+                //    {
+                //        Position = new Vector3( vert3[0], vert3[1], vert3[2] ),
+                //        UV = new Vector2( vert3[5], vert3[6] )
+                //    } );
+                //    indices.Add( ti + 0 );
+                //    indices.Add( ti + 1 );
+                //    indices.Add( ti + 2 );
+                //    added += 3;
+                //    p.NumFaces++;
                 //}
-
-                var tex = surf.texinfo.texture;
-                var invertedScale = ( 1f - scale );
-                //var pplane = surf.plane;
-                var firstVert = new BufferVertex
+                for ( int vi = 0; vi < p.numverts; vi++ )
+                //   for ( var i = 0; i < p.numverts; i++ )
                 {
-                    Position = new Vector3( -p.verts[0][0] * scale, p.verts[0][2] * scale, p.verts[0][1] * scale ),
-                    //Color = Microsoft.Xna.Framework.Color.White,
-                    UV = new Vector2( p.verts[0][3] * tex.scaleX, p.verts[0][4] * tex.scaleY ) * invertedScale,
-                    //TexCoord2 = new Microsoft.Xna.Framework.Vector2( p.verts[0][5], p.verts[0][6] ) * invertedScale,// texCoord,
-                    //Normal = normal
-                };
-                // [V0, V1, v2] [v0,v2,v3] [V0, V3, V4]
+                    var vert1 = p.verts[vi];
 
-                p.NumFaces = 0;
-
-                for ( var vi = 1; vi < p.numverts - 1; vi++ )
-                {
-                    var v = p.verts[vi];
-                    var pos = new Vector3( -p.verts[vi][0] * scale, p.verts[vi][1] * scale, p.verts[vi][2] * scale );
-                    var nextPos = new Vector3( -p.verts[vi + 1][0] * scale, p.verts[vi + 1][1] * scale, p.verts[vi + 1][2] * scale );
-                    var texCoord = new Vector2( p.verts[vi][3] * tex.scaleX, p.verts[vi][4] * tex.scaleY );
-                    var nextTexCoord = new Vector2( p.verts[vi + 1][3], p.verts[vi + 1][4] * tex.scaleY );
-                    var texCoord2 = new Vector2( p.verts[vi][5] * tex.scaleX, p.verts[vi][6] );
-                    var nextTexCoord2 = new Vector2( p.verts[vi + 1][5], p.verts[vi + 1][6] );
-                    indices.Add( ( UInt32 ) verts.Count );
-
-                    verts.Add( firstVert );
-
-                    indices.Add( ( UInt32 ) verts.Count );
+                    
+                    var texCoord = new Vector2( vert1[3] * surf.texinfo.texture.scaleX, vert1[4] * surf.texinfo.texture.scaleY );
+                    var texCoord2 = new Vector2( vert1[5], vert1[6] );
 
                     verts.Add( new BufferVertex
                     {
-                        Position = pos,
-                        //Color = Microsoft.Xna.Framework.Color.White,
-                        UV = texCoord * invertedScale,
-                        //TexCoord2 = texCoord2 * invertedScale,
-                        //Normal = normal
+                        Position = new Vector3( vert1[0], vert1[1], vert1[2] ),
+                        UV = texCoord,
+                        UV2 = texCoord2,
                     } );
-
-                    indices.Add( ( UInt32 ) verts.Count );
-
-
-                    verts.Add( new BufferVertex
-                    {
-                        Position = nextPos,
-                        //Color = Microsoft.Xna.Framework.Color.White,
-                        UV = nextTexCoord * invertedScale,
-                        //TexCoord2 = nextTexCoord2 * invertedScale,
-                        //Normal = normal
-                    } );
-
-                    p.NumFaces++;
                 }
+               // p.numverts = added;
+                //surf.polys = poly;
+
+                //var p = surf.polys;
+
+                //var baseIndex = p.FirstVertex;
+
+                //var pplane = surf.plane;
+                //var normal = new Vector3( -pplane.normal.X, -pplane.normal.Y, pplane.normal.Z );
+
+
+                ////for ( var vi = 0; vi < p.numverts; vi++ )
+                ////{
+                ////    CalcLightmapCoordinates( surf, p, vi );
+                ////}
+
+                //var tex = surf.texinfo.texture;
+                //var invertedScale = ( 1f - scale );
+
+                ////var pplane = surf.plane;
+                //var firstVert = new BufferVertex
+                //{
+                //    Position = new Vector3( p.verts[0][0] * scale, p.verts[0][1] * scale, p.verts[0][2] * scale ),
+                //    //Color = Microsoft.Xna.Framework.Color.White,
+                //    UV = new Vector2( p.verts[0][3] * tex.scaleX, p.verts[0][4] * tex.scaleY ) * invertedScale,
+                //    //TexCoord2 = new Microsoft.Xna.Framework.Vector2( p.verts[0][5], p.verts[0][6] ) * invertedScale,// texCoord,
+                //    //Normal = normal
+                //};
+                //// [V0, V1, v2] [v0,v2,v3] [V0, V3, V4]
+
+                //p.NumFaces = 0;
+
+                //for ( var vi = 1; vi < p.numverts - 1; vi++ )
+                //{
+                //    var v = p.verts[vi];
+                //    var pos = new Vector3( p.verts[vi][0] * scale, p.verts[vi][1] * scale, p.verts[vi][2] * scale );
+                //    var nextPos = new Vector3( p.verts[vi + 1][0] * scale, p.verts[vi + 1][1] * scale, p.verts[vi + 1][2] * scale );
+
+                //    var texCoord = new Vector2( p.verts[vi][3] * tex.scaleX, p.verts[vi][4] * tex.scaleY );
+                //    var nextTexCoord = new Vector2( p.verts[vi + 1][3], p.verts[vi + 1][4] * tex.scaleY );
+                //    var texCoord2 = new Vector2( p.verts[vi][5] * tex.scaleX, p.verts[vi][6] );
+                //    var nextTexCoord2 = new Vector2( p.verts[vi + 1][5], p.verts[vi + 1][6] );
+                //    //indices.Add( ( UInt32 ) verts.Count );
+                //    indices.Add( ( UInt32 ) verts.Count );
+                //    indices.Add( ( UInt32 ) verts.Count + 1 );
+                //    indices.Add( ( UInt32 ) verts.Count + 2 );
+
+                //    verts.Add( firstVert );
+
+                //    //indices.Add( ( UInt32 ) verts.Count );
+
+                //    verts.Add( new BufferVertex
+                //    {
+                //        Position = pos,
+                //        //Color = Microsoft.Xna.Framework.Color.White,
+                //        UV = texCoord * invertedTexscale,
+                //        //TexCoord2 = texCoord2 * invertedScale,
+                //        //Normal = normal
+                //    } );
+
+                //    //indices.Add( ( UInt32 ) verts.Count );
+
+
+                //    verts.Add( new BufferVertex
+                //    {
+                //        Position = nextPos,
+                //        //Color = Microsoft.Xna.Framework.Color.White,
+                //        UV = nextTexCoord * invertedTexscale,
+                //        //TexCoord2 = nextTexCoord2 * invertedScale,
+                //        //Normal = normal
+                //    } );
+
+                //    p.NumFaces++;
+                //}
             }
 
+            //UInt32 ti = 0;
+
+            //for ( int vi = 0; vi < verts.Count; vi += 3, ti += 3 )
+            //{
+            //    //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 0] ) );
+            //    //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 1] ) );
+            //    //vertices.Add( BSPFile.TransformVector( g.vertices[vi + 2] ) );
+
+            //    //uvs.Add( g.uvs[vi + 0] );
+            //    //uvs.Add( g.uvs[vi + 1] );
+            //    //uvs.Add( g.uvs[vi + 2] );
+
+            //    indices.Add( ti + 2 );
+            //    indices.Add( ti + 1 );
+            //    indices.Add( ti + 0 );
+            //}
+
+
+            //PixelFormat formatOutput = PixelFormat.Format32bppArgb;
+            //Rectangle rect = new Rectangle( 0, 0, LIGHTMAP_WIDTH, LIGHTMAP_HEIGHT );
+            //Bitmap bmp = new Bitmap( LIGHTMAP_WIDTH, LIGHTMAP_HEIGHT, formatOutput );
+            //BitmapData bmpData = bmp.LockBits( rect, ImageLockMode.ReadOnly, formatOutput );
+
+            //var bytes = new Byte[NewLightData.Length * Marshal.SizeOf<UInt32>( )];
+
+            //System.Buffer.BlockCopy( NewLightData, 0, bytes, 0, NewLightData.Length );
+
+            //Marshal.Copy( bytes, 0, bmpData.Scan0, bytes.Length );
+            //bmp.UnlockBits( bmpData );
+            //bmp.Save( @"H:\Source\Repos\SharpQuake\SharpQuake\bin\Debug\net48\light.png" );
+
+
+            lmTexture = BaseTexture.FromBuffer( _device, "LM", NewLightData, LIGHTMAP_WIDTH, LIGHTMAP_HEIGHT, false, false, "GL_LINEAR", ignoreCache: true  );
+            //LoadedMap.LightmapTexture = CreateTexture(LightmapBitmap, LIGHTMAP_WIDTH, LIGHTMAP_HEIGHT, GL_RED, GL_LINEAR, GL_CLAMP_TO_EDGE);
             VertexBuffer = verts.ToArray( );
             IndexBuffer = indices.ToArray( );
         }
@@ -755,23 +870,231 @@ namespace SharpQuake.Game.Data.Models
             //        indices.Add( ti + 0 );
             //    }
 
+            if ( !IsWorld )
+                return;
             BuildSurfaces2( );
 
             _modelBuffers = BaseModelBuffer.New( _device, VertexBuffer, IndexBuffer );
         }
 
-        public void Draw( )
+        private List<GLPoly> Polys;
+
+        public void Draw( BaseTexture lightmapTexture, Byte[] lightmapData )
         {
+            if ( !IsWorld )
+                return;
+
             //_modelBuffers?.Draw( );
             _modelBuffers.Begin( );
 
-            //foreach ( var surface in Surfaces )
-            //{
-            //    _modelBuffers.BeginTexture( surface.texinfo.texture.texture );
-            //    _modelBuffers.DrawPoly( surface.polys );
-            //}
-            _modelBuffers.Draw( );
+            foreach ( var p in Polys )
+            {
+                if ( p == null )
+                    continue;
+                _modelBuffers.BeginTexture( ( BaseTexture ) p.Texture );
+                _modelBuffers.DrawPoly( p, lightmapTexture, lightmapData );
+            }
+            //_modelBuffers.Draw( );
             _modelBuffers.End( );
+
+        }
+        public void DrawPoly( MemorySurface surf, BaseTexture lightmapTexture, Byte[] lightmapData )
+        {
+            if ( !IsWorld )
+                return;
+
+            var p = surf.NewPoly;
+
+            if ( _modelBuffers == null )
+                return;
+
+            //_modelBuffers?.Draw( );
+            _modelBuffers.Begin( );
+
+            _modelBuffers.BeginTexture( ( BaseTexture ) p.Texture );
+            _modelBuffers.DrawPoly( p, lmTexture, lightmapData );
+
+            //_modelBuffers.Draw( );
+            _modelBuffers.End( );
+
+        }
+        public void BuildLightmaps( Action<MemorySurface> onBuildLighting )
+        {
+            return;
+
+            for ( var i = 0; i < NumSurfaces; i++)
+            {
+                var m = Surfaces[i];
+                //onBuildLighting?.Invoke( m );
+
+                var poly = Polys[i];
+                poly.LightMapTextureNum = m.lightmaptexturenum;
+            }
+        }
+
+        private GLPoly BuildPoly( MemorySurface fa )
+        {
+            // Skip certain surface types
+            if ( ( fa.flags & ( ( Int32 ) Q1SurfaceFlags.Sky | ( Int32 ) Q1SurfaceFlags.Turbulence | ( Int32 ) Q1SurfaceFlags.Underwater ) ) != 0 )
+                return null;
+
+            // Determine block size
+            var LightmapBlockWidth = ( fa.extents.x >> 4 ) + 1;
+            var LightmapBlockHeight = ( fa.extents.y >> 4 ) + 1;
+
+            // Allocate block in the large lightmap texture
+            if ( !AllocBlock( LightmapBlockWidth, LightmapBlockHeight, out fa.light_s, out fa.light_t ) )
+            {
+                Console.WriteLine( "Failed to allocate block for lightmap." );
+                return null;
+            }
+
+            var length = LightmapBlockWidth * LightmapBlockHeight;
+
+            // Check bounds
+            if ( fa.sampleofs < 0 || fa.sampleofs + length > LightData.Length )
+            {
+                Console.WriteLine( "Sample offset out of range." );
+                return null;
+            }
+
+            // Get the lightmap texels
+            var LightmapTexels = new Span<byte>( LightData, fa.sampleofs, length );
+
+            // Populate NewLightData with lightmap texels
+            for ( var Y = 0; Y < LightmapBlockHeight; Y++ )
+            {
+                for ( var X = 0; X < LightmapBlockWidth; X++ )
+                {
+                    var pI = X + Y * LightmapBlockWidth;
+
+                    if ( pI >= LightmapTexels.Length )
+                        continue;
+
+                    var Pixel = LightmapTexels[pI];
+                    var ImageIndex = ( X + fa.light_s ) + ( Y + fa.light_t ) * LIGHTMAP_WIDTH;
+
+                    if ( ImageIndex >= NewLightData.Length )
+                        continue;
+
+                    NewLightData[ImageIndex] = ( UInt32 ) Color.FromArgb( 255, Pixel, Pixel, Pixel ).ToArgb( );
+                }
+            }
+
+            // Construct the polygon and remap the UV coordinates to the new large texture
+            var pedges = Edges;
+            var lnumverts = fa.numedges;
+
+            var poly = new GLPoly( );
+            poly.AllocVerts( lnumverts );
+            poly.flags = fa.flags;
+            fa.NewPoly = poly;
+
+            UInt16[] r_pedge_v;
+            Vector3 vec;
+
+            for ( var i = 0; i < lnumverts; i++ )
+            {
+                var lindex = SurfEdges[fa.firstedge + i];
+                if ( lindex > 0 )
+                {
+                    r_pedge_v = pedges[lindex].v;
+                    vec = Vertices[r_pedge_v[0]].position;
+                }
+                else
+                {
+                    r_pedge_v = pedges[-lindex].v;
+                    vec = Vertices[r_pedge_v[1]].position;
+                }
+                var s = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[0] ) + fa.texinfo.vecs[0].W;
+                s /= fa.texinfo.texture.width;
+
+                var t = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[1] ) + fa.texinfo.vecs[1].W;
+                t /= fa.texinfo.texture.height;
+
+                poly.verts[i][0] = vec.X;
+                poly.verts[i][1] = vec.Y;
+                poly.verts[i][2] = vec.Z;
+                poly.verts[i][3] = s;
+                poly.verts[i][4] = t;
+
+                // Remap lightmap texture coordinates to the large texture
+                s = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[0] ) + fa.texinfo.vecs[0].W;
+                s -= fa.texturemins.x;
+                s += fa.light_s * 16;
+                s += 8;
+                s /= ( float ) LIGHTMAP_WIDTH * 16;
+
+                t = MathLib.DotProduct( ref vec, ref fa.texinfo.vecs[1] ) + fa.texinfo.vecs[1].W;
+                t -= fa.texturemins.y;
+                t += fa.light_t * 16;
+                t += 8;
+                t /= ( float ) LIGHTMAP_HEIGHT * 16;
+
+                poly.verts[i][5] = s;
+                poly.verts[i][6] = t;
+            }
+
+            // Remove collinear points if necessary
+            if ( ( fa.flags & ( Int32 ) Q1SurfaceFlags.Underwater ) == 0 )
+            {
+                for ( var i = 0; i < lnumverts; ++i )
+                {
+                    if ( Utilities.IsCollinear( poly.verts[( i + lnumverts - 1 ) % lnumverts],
+                        poly.verts[i],
+                        poly.verts[( i + 1 ) % lnumverts] ) )
+                    {
+                        for ( var j = i + 1; j < lnumverts; ++j )
+                        {
+                            for ( var k = 0; k < ModelDef.VERTEXSIZE; ++k )
+                                poly.verts[j - 1][k] = poly.verts[j][k];
+                        }
+                        --lnumverts;
+                        --i;
+                    }
+                }
+            }
+            poly.numverts = lnumverts;
+
+            return poly;
+        }
+
+        static UInt32[] NewLightData;
+        const Int32 LIGHTMAP_WIDTH = 1024;
+        const Int32 LIGHTMAP_HEIGHT = 1024;
+        static Int32[] Allocated = new Int32[LIGHTMAP_WIDTH];
+
+        bool AllocBlock( Int32 Width, Int32 Height, out Int32 X, out Int32 Y )
+        {
+            X = 0;
+            Y = 0;
+
+            Int32 Best = LIGHTMAP_HEIGHT;
+
+            for ( var I = 0; I < LIGHTMAP_WIDTH - Width; I++ )
+            {
+                var Best2 = 0;
+                var J = 0;
+                for ( J = 0; J < Width; J++ )
+                {
+                    if ( Allocated[I + J] >= Best ) break;
+                    if ( Allocated[I + J] > Best2 ) Best2 = Allocated[I + J];
+                }
+                if ( J == Width )
+                {
+                    X = I;
+                    Y = Best = Best2;
+                }
+            }
+
+            if ( Best + Height > LIGHTMAP_HEIGHT ) return false;
+
+            for ( int I = 0; I < Width; I++ )
+            {
+                Allocated[X + I] = Best + Height;
+            }
+
+            return true;
         }
 
         private void BuildSurface( List<BufferVertex> vertexBuffer, MemorySurface fa )
